@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ComingSoon } from '@/components/ui/ComingSoon';
 
 const columns = [
   {
@@ -66,12 +67,22 @@ export function Footer() {
               <ul className="mt-4 space-y-2.5">
                 {column.links.map((link) => (
                   <li key={link.label}>
-                    <Link
-                      href={link.href}
-                      className="text-xs text-neutral-500 transition-colors hover:text-white"
-                    >
-                      {link.label}
-                    </Link>
+                    {link.label === 'Video MCP' ? (
+                      <ComingSoon
+                        className="text-xs text-neutral-500 transition-colors hover:text-white"
+                        title="Video MCP"
+                        message="The Krix MCP server is still in the works. We’ll let you know the moment it ships."
+                      >
+                        {link.label} <span className="ml-1 rounded-full bg-white/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-neutral-400">Soon</span>
+                      </ComingSoon>
+                    ) : (
+                      <Link
+                        href={link.href}
+                        className="text-xs text-neutral-500 transition-colors hover:text-white"
+                      >
+                        {link.label}
+                      </Link>
+                    )}
                   </li>
                 ))}
               </ul>

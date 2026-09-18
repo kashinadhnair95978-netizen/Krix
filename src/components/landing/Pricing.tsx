@@ -17,6 +17,20 @@ interface Plan {
 
 const plans: Plan[] = [
   {
+    name: 'Free',
+    monthly: 0,
+    annual: 0,
+    description: 'Everything you need to try Krix.',
+    features: [
+      '3 videos per month',
+      'Basic repurposing formats',
+      'Watermarked exports',
+      'Community support',
+    ],
+    cta: 'Start for free',
+    highlight: false,
+  },
+  {
     name: 'Basic',
     monthly: 29,
     annual: 23,
@@ -42,7 +56,7 @@ const plans: Plan[] = [
       'AI custom branding',
       'Advanced analytics',
     ],
-    cta: 'Start free trial',
+    cta: 'Get Pro',
     highlight: true,
   },
   {
@@ -67,7 +81,7 @@ export function Pricing() {
 
   return (
     <section id="pricing" className="bg-black py-24 md:py-32">
-      <div className="mx-auto max-w-5xl px-6">
+      <div className="mx-auto max-w-6xl px-6">
         <div className="mx-auto max-w-2xl text-center">
           <h2 className="text-balance text-3xl font-semibold tracking-tight text-white md:text-5xl md:leading-tight">
             Simple, transparent pricing.
@@ -109,12 +123,12 @@ export function Pricing() {
           {annual ? 'Billed annually — save 20%.' : 'Save 20% when billed annually.'}
         </p>
 
-        <div className="grid gap-6 md:grid-cols-3 md:gap-8">
+        <div className="grid gap-4 sm:grid-cols-2 md:gap-6 lg:grid-cols-4">
           {plans.map((plan) => (
             <div
               key={plan.name}
               className={cn(
-                'relative flex flex-col rounded-3xl border bg-[#0d0d0f] p-8 md:p-10',
+                'relative flex flex-col rounded-3xl border bg-[#0d0d0f] p-6 md:p-8',
                 plan.highlight
                   ? 'border-white shadow-[0_20px_80px_-15px_rgba(255,255,255,0.15)]'
                   : 'border-white/10'

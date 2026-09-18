@@ -22,6 +22,7 @@ import {
 } from './icons';
 import { SpotlightCard } from './SpotlightCard';
 import { Reveal } from './Reveal';
+import { ComingSoon } from '@/components/ui/ComingSoon';
 import type { ReactNode } from 'react';
 
 interface Model {
@@ -126,6 +127,7 @@ interface Workflow {
   description: string;
   cta: string;
   icon: ReactNode;
+  comingSoon?: boolean;
 }
 
 const workflows: Workflow[] = [
@@ -140,9 +142,10 @@ const workflows: Workflow[] = [
     title: 'MCP',
     tag: 'New',
     description:
-      'The video MCP any AI agent workflow can use. Connect your agent to clip, caption, reframe, reframe, schedule and publish — over one protocol.',
+      'The video MCP any AI agent workflow can use. Connect your agent to clip, caption, reframe, schedule and publish — over one protocol.',
     cta: 'View server examples',
     icon: <Bot className="h-5 w-5" />,
+    comingSoon: true,
   },
   {
     title: 'Inspiration gallery',
@@ -341,8 +344,17 @@ export function Capabilities() {
                       {workflow.description}
                     </p>
                     <span className="group/link mt-auto inline-flex items-center gap-1.5 pt-6 text-sm font-medium text-white">
-                      {workflow.cta}
-                      <ArrowUpRight className="h-4 w-4 transition-transform duration-300 group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5" />
+                      {workflow.comingSoon ? (
+                        <ComingSoon className="inline-flex items-center gap-1.5">
+                          {workflow.cta} <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-white">Soon</span>
+                          <ArrowUpRight className="h-4 w-4" />
+                        </ComingSoon>
+                      ) : (
+                        <>
+                          {workflow.cta}
+                          <ArrowUpRight className="h-4 w-4 transition-transform duration-300 group-hover/link:translate-x-0.5 group-hover/link:-translate-y-0.5" />
+                        </>
+                      )}
                     </span>
                   </div>
                 </SpotlightCard>

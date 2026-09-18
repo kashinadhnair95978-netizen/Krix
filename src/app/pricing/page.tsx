@@ -11,6 +11,22 @@ import { Check } from '@/components/landing/icons';
 
 const plans = [
   {
+    id: 'free',
+    name: 'Free',
+    monthly: 0,
+    annual: 0,
+    priceInrMonthly: 0,
+    priceInrAnnual: 0,
+    description: 'Everything you need to try Krix.',
+    features: [
+      '3 videos per month',
+      'Basic repurposing formats',
+      'Watermarked exports',
+      'Community support',
+    ],
+    highlight: false,
+  },
+  {
     id: 'basic',
     name: 'Basic',
     monthly: 29,
@@ -74,13 +90,14 @@ export default function PricingPage() {
   };
 
   const selected = plans.find((p) => p.id === selectedPlan);
+  const isFree = (planId: string) => planId === 'free';
 
   return (
     <main className="min-h-screen bg-black text-white">
       <Navbar />
 
       <section className="pb-24 pt-28 md:pb-32 md:pt-32">
-        <div className="mx-auto max-w-5xl px-6">
+        <div className="mx-auto max-w-6xl px-6">
           <div className="mx-auto max-w-2xl text-center">
             <h1 className="text-balance text-4xl font-semibold tracking-tight text-white md:text-6xl md:leading-tight">
               Simple, transparent pricing.
@@ -122,14 +139,14 @@ export default function PricingPage() {
             {annual ? 'Billed annually — save 20%.' : 'Save 20% when billed annually.'}
           </p>
 
-          <div className="grid gap-6 md:grid-cols-3 md:gap-8">
+          <div className="grid gap-4 sm:grid-cols-2 md:gap-6 lg:grid-cols-4">
             {plans.map((plan) => {
               const price = annual ? plan.annual : plan.monthly;
               return (
                 <div
                   key={plan.id}
                   className={cn(
-                    'relative flex flex-col rounded-3xl border bg-[#0d0d0f] p-8 md:p-10',
+                    'relative flex flex-col rounded-3xl border bg-[#0d0d0f] p-6 md:p-8',
                     plan.highlight
                       ? 'border-white shadow-[0_20px_80px_-15px_rgba(255,255,255,0.15)]'
                       : 'border-white/10'
@@ -158,17 +175,29 @@ export default function PricingPage() {
                     {annual ? 'billed annually' : 'billed monthly'}
                   </p>
 
-                  <button
-                    onClick={() => handleSelect(plan.id)}
-                    className={cn(
-                      'mt-8 flex w-full items-center justify-center rounded-full py-3 text-sm font-medium transition-colors',
-                      plan.highlight
-                        ? 'bg-white text-black hover:bg-neutral-200'
-                        : 'border border-white/20 text-white hover:bg-white/5'
-                    )}
-                  >
-                    Choose {plan.name}
-                  </button>
+                  {isFree(plan.id) ? (
+                    <Link
+                      href="/auth/signup"
+                      className={cn(
+                        'mt-8 flex w-full items-center justify-center rounded-full py-3 text-sm font-medium transition-colors',
+                        'border border-white/20 text-white hover:bg-white/5'
+                      )}
+                    >
+                      Start for free
+                    </Link>
+                  ) : (
+                    <button
+                      onClick={() => handleSelect(plan.id)}
+                      className={cn(
+                        'mt-8 flex w-full items-center justify-center rounded-full py-3 text-sm font-medium transition-colors',
+                        plan.highlight
+                          ? 'bg-white text-black hover:bg-neutral-200'
+                          : 'border border-white/20 text-white hover:bg-white/5'
+                      )}
+                    >
+                      Choose {plan.name}
+                    </button>
+                  )}
 
                   <ul className="mt-8 space-y-3 border-t border-white/10 pt-8">
                     {plan.features.map((feature) => (
