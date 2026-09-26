@@ -49,7 +49,7 @@ const testimonials = [
 
 function TestimonialCard({ t }: { t: (typeof testimonials)[number] }) {
   return (
-    <figure className="w-[320px] shrink-0 rounded-3xl border border-white/10 bg-[#0d0d0f] p-7 sm:w-[380px]">
+    <figure className="w-[min(320px,85vw)] shrink-0 rounded-3xl border border-white/10 bg-[#0d0d0f] p-7 sm:w-[380px]">
       <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white text-black">
         <Quote className="h-4 w-4" />
       </div>

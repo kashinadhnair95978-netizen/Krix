@@ -182,7 +182,7 @@ export default function SettingsPage() {
                 ].map(([key, label]) => (
                   <li
                     key={key}
-                    className="flex items-center justify-between text-sm text-neutral-500"
+                    className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm text-neutral-500"
                   >
                     <code className="text-neutral-300">{key}</code>
                     <span>{label}</span>

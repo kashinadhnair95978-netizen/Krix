@@ -1,0 +1,34 @@
+# Krix AI worker — Python dependencies
+# Target runtime: Python 3.12 (see README). CUDA 12.x with an NVIDIA GPU.
+#
+# To rebuild exact versions:
+#   python -m pip install -r requirements.txt
+
+# Core
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+python-dotenv>=1.0
+pydantic>=2.7,<3.0
+httpx>=0.27,<1.0
+
+# Machine learning
+torch>=2.4,<3.0
+transformers>=4.57,<6.0
+accelerate>=0.33,<2.0
+safetensors>=0.4
+bitsandbytes>=0.43,<2.0
+pillow>=10.3
+numpy>=1.26,<3.0
+soundfile>=0.12     # WAV decode for the forced aligner (pure-python wheel, bundles libsndfile)
+librosa>=0.11       # transformers<loader for Qwen3-ASR apply_transcription_request audio decoding
+
+# Supabase (service role, server-side)
+supabase>=2.5,<3.0
+
+# Testing
+pytest>=8.0,<9.0
+pytest-asyncio>=0.23,<1.0
+
+# Not required by default; add only when your video's language needs them:
+# nagisa            # Japanese forced-alignment tokenization
+# soynlp            # Korean forced-alignment tokenization

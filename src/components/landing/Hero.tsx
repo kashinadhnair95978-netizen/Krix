@@ -99,7 +99,7 @@ export function Hero() {
                 <Captions className="h-4 w-4 text-white/70" />
                 Auto-captions · hook detection · platform resize
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2">
                 {['YT Shorts', 'LinkedIn', 'X', 'Blog', 'Email'].map((f) => (
                   <span
                     key={f}
@@ -111,7 +111,7 @@ export function Hero() {
               </div>
             </div>
           </div>
-          <div className="mt-4 flex items-center justify-center gap-6 text-xs text-neutral-500">
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs text-neutral-500">
             <span className="inline-flex items-center gap-1.5">
               <LinkIcon className="h-3.5 w-3.5" /> Paste a YouTube link
             </span>

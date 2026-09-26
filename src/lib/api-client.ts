@@ -35,6 +35,10 @@ export const apiClient = {
   getVideoById: (videoId: string) => api.get(`/api/videos/${videoId}`),
   deleteVideo: (videoId: string) => api.delete(`/api/videos/${videoId}`),
 
+  // AI clips
+  getGeneratedClips: (videoId: string) =>
+    api.get(`/api/clips`, { params: { videoId } }),
+
   // Repurposing
   repurposeVideo: (videoId: string) => api.post('/api/repurpose', { videoId }),
   getContent: (videoId: string) => api.get(`/api/content/${videoId}`),

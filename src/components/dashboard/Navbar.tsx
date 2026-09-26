@@ -6,12 +6,16 @@ import Link from 'next/link';
 import { useAuth } from '@/lib/hooks';
 
 const links = [
-  { href: '/dashboard', label: 'Center' },
-  { href: '/dashboard/videos', label: 'My clips' },
-  { href: '/dashboard/calendar', label: 'Calendar' },
-  { href: '/dashboard/analytics', label: 'Analytics' },
-  { href: '/dashboard/api', label: 'API' },
-  { href: '/dashboard/settings', label: 'Settings' },
+  { href: '/dashboard', label: 'Center', icon: '🏠' },
+  { href: '/dashboard/upload', label: 'Create new', icon: '🎬' },
+  { href: '/dashboard/projects', label: 'My projects', icon: '🗂️' },
+  { href: '/dashboard/videos', label: 'My clips', icon: '🎥' },
+  { href: '/dashboard/calendar', label: 'Calendar', icon: '📅' },
+  { href: '/dashboard/analytics', label: 'Analytics', icon: '📊' },
+  { href: '/dashboard/inspiration', label: 'Inspiration', icon: '✨' },
+  { href: '/dashboard/api', label: 'API & MCP', icon: '🔌' },
+  { href: '/dashboard/team', label: 'Team', icon: '👥' },
+  { href: '/dashboard/settings', label: 'Settings', icon: '⚙️' },
 ];
 
 function initials(name?: string) {
@@ -43,7 +47,7 @@ export function Navbar() {
             krix<span className="align-super text-[9px] text-neutral-500">™</span>
           </Link>
 
-          <div className="hidden md:flex items-center gap-1">
+          <div className="hidden lg:flex items-center gap-1">
             {links.map((link) => {
               const active = isActive(link.href);
               return (
@@ -89,7 +93,7 @@ export function Navbar() {
           </Link>
 
           <button
-            className="md:hidden text-xl text-neutral-200"
+            className="lg:hidden text-xl text-neutral-200"
             onClick={() => setMenuOpen(!menuOpen)}
             aria-label="Toggle menu"
           >
@@ -99,19 +103,20 @@ export function Navbar() {
       </nav>
 
       {menuOpen && (
-        <div className="md:hidden border-t border-white/10 bg-black/90 px-4 py-3 space-y-1">
+        <div className="lg:hidden border-t border-white/10 bg-black/95 px-4 py-3 space-y-1 max-h-[70vh] overflow-y-auto">
           {links.map((link) => (
             <Link
               key={link.href}
               href={link.href}
               onClick={() => setMenuOpen(false)}
-              className={`block rounded-lg px-3 py-2 text-sm ${
+              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm ${
                 isActive(link.href)
                   ? 'bg-white/10 text-white font-medium'
                   : 'text-neutral-400 hover:text-white'
               }`}
             >
-              {link.label}
+              <span className="w-5 text-center">{link.icon}</span>
+              <span className="flex-1">{link.label}</span>
             </Link>
           ))}
           <Link
@@ -121,6 +126,14 @@ export function Navbar() {
           >
             Get free clips
           </Link>
+          <div className="flex items-center gap-3 border-t border-white/10 px-3 pt-3 pb-1">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-neutral-500 via-neutral-700 to-black text-xs font-semibold text-white ring-1 ring-white/25">
+              {initials(user?.full_name)}
+            </div>
+            <span className="truncate text-sm text-neutral-300">
+              {user?.full_name || 'Account'}
+            </span>
+          </div>
         </div>
       )}
     </header>

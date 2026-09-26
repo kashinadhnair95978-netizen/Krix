@@ -56,7 +56,7 @@ export function VideoUpload({ initialTitle }: { initialTitle?: string }) {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
       <div
-        className={`relative overflow-hidden rounded-3xl border-2 border-dashed p-10 text-center transition-all ${
+        className={`relative overflow-hidden rounded-3xl border-2 border-dashed p-6 text-center transition-all sm:p-10 ${
           dragging
             ? 'border-white/50 bg-white/[0.08]'
             : 'border-white/15 bg-white/[0.03] hover:border-white/30'

@@ -11,4 +11,12 @@ npm-debug.log*
 next-env.d.ts
 .vercel
 *.tsbuildinfo
-next-env.d.ts
+
+# AI worker
+ai-worker/.venv
+ai-worker/.venv/*
+ai-worker/work
+ai-worker/work-*
+ai-worker/**/__pycache__/
+*.py[cod]
+.pytest_cache/

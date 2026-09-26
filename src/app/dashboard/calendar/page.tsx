@@ -114,18 +114,18 @@ export default function CalendarPage() {
         }
       />
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-4 sm:p-6">
-            <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] font-semibold uppercase tracking-wider text-neutral-600">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.03] p-3 sm:p-6">
+            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-semibold uppercase tracking-wider text-neutral-600 sm:gap-1.5 sm:text-[11px]">
               {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
                 <span key={d} className="py-1">{d}</span>
               ))}
             </div>
-            <div className="mt-2 grid grid-cols-7 gap-1.5">
+            <div className="mt-1 grid grid-cols-7 gap-1 sm:mt-2 sm:gap-1.5">
               {cells.map((day, i) => {
                 if (day === null) {
-                  return <div key={`empty-${i}`} className="min-h-24 rounded-xl bg-transparent" />;
+                  return <div key={`empty-${i}`} className="min-h-14 rounded-lg bg-transparent sm:min-h-24 sm:rounded-xl" />;
                 }
                 const dayPosts = posts[day] || [];
                 const isToday = day === now.getDate() && month === now.getMonth() && year === now.getFullYear();
@@ -133,14 +133,14 @@ export default function CalendarPage() {
                   <button
                     key={day}
                     onClick={() => setEditingDay(editingDay === day ? null : day)}
-                    className={`group relative min-h-24 rounded-xl border p-1.5 text-left transition-all ${
+                    className={`group relative min-h-14 rounded-lg border p-1 text-left transition-all sm:min-h-24 sm:rounded-xl sm:p-1.5 ${
                       isToday
                         ? 'border-white/50 bg-white/[0.08]'
                         : 'border-white/10 bg-black/30 hover:border-white/30 hover:bg-white/[0.05]'
                     } ${editingDay === day ? 'ring-2 ring-white/40' : ''}`}
                   >
-                    <span className={`text-xs font-medium ${isToday ? 'text-white' : 'text-neutral-500'}`}>{day}</span>
-                    <div className="mt-1 space-y-1">
+                    <span className={`text-[11px] font-medium sm:text-xs ${isToday ? 'text-white' : 'text-neutral-500'}`}>{day}</span>
+                    <div className="mt-0.5 hidden space-y-1 sm:mt-1 sm:block">
                       {dayPosts.slice(0, 3).map((post) => (
                         <div key={post.id} className={`truncate rounded-md px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset ${platformColor[post.platform]}`}>
                           {post.time} {post.label}
@@ -150,6 +150,13 @@ export default function CalendarPage() {
                         <div className="px-1 text-[10px] text-neutral-600">+{dayPosts.length - 3} more</div>
                       )}
                     </div>
+                    {dayPosts.length > 0 && (
+                      <div className="absolute bottom-1 left-1/2 flex -translate-x-1/2 gap-0.5 sm:hidden">
+                        {dayPosts.slice(0, 3).map((post) => (
+                          <span key={post.id} className={`h-1.5 w-1.5 rounded-full ${post.platform === 'YouTube' ? 'bg-red-400' : post.platform === 'TikTok' ? 'bg-white' : post.platform === 'LinkedIn' ? 'bg-blue-400' : 'bg-neutral-400'}`} />
+                        ))}
+                      </div>
+                    )}
                   </button>
                 );
               })}

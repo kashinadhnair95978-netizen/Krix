@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { browserSupabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { GoogleSignIn } from './GoogleSignIn';
 
 export function LoginForm() {
   const [email, setEmail] = useState('');
@@ -47,6 +48,16 @@ export function LoginForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4 max-w-sm mx-auto">
+      <GoogleSignIn label="Continue with Google" />
+
+      <div className="flex items-center gap-3 py-1">
+        <span className="h-px flex-1 bg-neutral-200" />
+        <span className="text-xs uppercase tracking-wider text-neutral-400">
+          or sign in with email
+        </span>
+        <span className="h-px flex-1 bg-neutral-200" />
+      </div>
+
       <Input
         label="Email"
         type="email"

@@ -101,11 +101,11 @@ export function CommandPalette() {
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-start justify-center bg-black/60 px-4 pt-24 backdrop-blur-sm"
+      className="fixed inset-0 z-[70] flex items-start justify-center bg-black/60 px-4 pt-16 pb-6 backdrop-blur-sm"
       onClick={() => setOpen(false)}
     >
       <div
-        className="w-full max-w-lg overflow-hidden rounded-3xl border border-white/10 bg-[#101014] shadow-2xl animate-scale-in"
+        className="w-full max-w-lg overflow-y-auto rounded-3xl border border-white/10 bg-[#101014] shadow-2xl animate-scale-in"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"

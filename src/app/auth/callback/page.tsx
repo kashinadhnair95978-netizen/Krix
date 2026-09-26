@@ -11,7 +11,9 @@ export default function AuthCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       const { error } = await browserSupabase.auth.exchangeCodeForSession(
-        window.location.search.includes('code=') ? window.location.search.slice(1) : ''
+        window.location.search.includes('code=')
+          ? window.location.search.slice(1)
+          : ''
       );
 
       if (error) {
@@ -20,7 +22,25 @@ export default function AuthCallback() {
         return;
       }
 
-      router.replace('/dashboard');
+      // OAuth users (e.g. Google) have no profile row yet — create one.
+      try {
+        await fetch('/api/auth/upsert-profile', { method: 'POST' });
+      } catch (err) {
+        console.error('Could not upsert profile:', err);
+      }
+
+      const pendingUrl =
+        typeof window !== 'undefined'
+          ? window.sessionStorage.getItem('krix_pending_url')
+          : null;
+      if (pendingUrl) {
+        window.sessionStorage.removeItem('krix_pending_url');
+        router.replace(
+          `/dashboard/upload?url=${encodeURIComponent(pendingUrl)}`
+        );
+      } else {
+        router.replace('/dashboard');
+      }
     };
 
     // Wait a tick so the session cookie is set

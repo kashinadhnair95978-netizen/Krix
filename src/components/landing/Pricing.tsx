@@ -32,8 +32,8 @@ const plans: Plan[] = [
   },
   {
     name: 'Basic',
-    monthly: 29,
-    annual: 23,
+    monthly: 15,
+    annual: 12,
     description: 'Perfect for getting started.',
     features: [
       '10 videos per month',
@@ -46,8 +46,8 @@ const plans: Plan[] = [
   },
   {
     name: 'Pro',
-    monthly: 59,
-    annual: 47,
+    monthly: 24,
+    annual: 19,
     description: 'For creators who post everywhere.',
     features: [
       'Unlimited videos',
@@ -61,8 +61,8 @@ const plans: Plan[] = [
   },
   {
     name: 'Enterprise',
-    monthly: 99,
-    annual: 79,
+    monthly: 70,
+    annual: 56,
     description: 'For teams and agencies.',
     features: [
       'Everything in Pro',

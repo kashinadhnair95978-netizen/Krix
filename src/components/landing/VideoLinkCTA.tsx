@@ -89,27 +89,37 @@ export function VideoLinkCTA() {
 
   return (
     <div className="mx-auto max-w-2xl">
-      <form onSubmit={handleSubmit} className="relative">
-        <LinkIcon className="pointer-events-none absolute left-5 top-1/2 h-5 w-5 -translate-y-1/2 text-neutral-400" />
-        <input
-          type="text"
-          value={link}
-          onChange={(e) => {
-            setLink(e.target.value);
-            setError('');
-          }}
-          placeholder="Drop a video link"
-          aria-label="Video link"
-          className="w-full rounded-full border border-white/15 bg-white/[0.06] py-4 pr-40 text-[15px] text-white placeholder-neutral-500 outline-none transition-colors duration-200 focus:border-white/40 focus:bg-white/[0.09]"
-          style={{ paddingLeft: '3.25rem' }}
-        />
+      <form onSubmit={handleSubmit} className="relative flex flex-col gap-2 sm:block">
+        <div className="relative">
+          <LinkIcon className="pointer-events-none absolute left-5 top-1/2 h-5 w-5 -translate-y-1/2 text-neutral-400" />
+          <input
+            type="text"
+            value={link}
+            onChange={(e) => {
+              setLink(e.target.value);
+              setError('');
+            }}
+            placeholder="Drop a video link"
+            aria-label="Video link"
+            className="w-full rounded-full border border-white/15 bg-white/[0.06] py-4 pr-5 text-[15px] text-white placeholder-neutral-500 outline-none transition-colors duration-200 focus:border-white/40 focus:bg-white/[0.09] sm:pr-40"
+            style={{ paddingLeft: '3.25rem' }}
+          />
+          <button
+            type="submit"
+            disabled={loading}
+            className="absolute right-2 top-1/2 hidden -translate-y-1/2 items-center gap-1.5 rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black transition-all duration-200 hover:bg-neutral-200 disabled:opacity-60 sm:flex"
+          >
+            {loading ? 'Jumping in…' : 'Get free clips'}
+            <ArrowRight className="h-4 w-4" />
+          </button>
+        </div>
         <button
           type="submit"
           disabled={loading}
-          className="group absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1.5 rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black transition-all duration-200 hover:bg-neutral-200 disabled:opacity-60"
+          className="flex w-full items-center justify-center gap-1.5 rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition-all duration-200 hover:bg-neutral-200 disabled:opacity-60 sm:hidden"
         >
           {loading ? 'Jumping in…' : 'Get free clips'}
-          <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+          <ArrowRight className="h-4 w-4" />
         </button>
       </form>
 

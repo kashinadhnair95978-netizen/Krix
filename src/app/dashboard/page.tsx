@@ -53,7 +53,7 @@ function DashboardSkeleton() {
         <Skeleton className="mt-3 h-4 w-full max-w-md" />
       </div>
       <Skeleton className="h-44 w-full rounded-3xl" />
-      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
         {[0, 1, 2, 3].map((i) => (
           <SkeletonCard key={i} lines={2} />
         ))}
@@ -207,7 +207,7 @@ export default function Dashboard() {
             New upload →
           </Link>
         </div>
-        <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
           {createTiles.map((tile) => (
             <Link
               key={tile.title}

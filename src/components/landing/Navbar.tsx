@@ -8,6 +8,7 @@ import { browserSupabase } from '@/lib/supabase';
 export function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [signedIn, setSignedIn] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -58,7 +59,7 @@ export function Navbar() {
           </Link>
         </div>
 
-        <div className="flex items-center gap-4 text-sm">
+        <div className="flex items-center gap-2 text-sm sm:gap-4">
           {signedIn ? (
             <Link
               href="/dashboard"
@@ -76,18 +77,74 @@ export function Navbar() {
               </Link>
               <Link
                 href="/auth/signup"
-                className="group relative overflow-hidden rounded-full bg-white px-4 py-1.5 font-medium text-black transition-colors duration-200 hover:bg-neutral-200"
+                className="hidden rounded-full bg-white px-4 py-1.5 font-medium text-black transition-colors duration-200 hover:bg-neutral-200 sm:inline"
               >
-                <span
-                  aria-hidden
-                  className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-neutral-400/40 to-transparent transition-transform duration-700 ease-out group-hover:translate-x-full"
-                />
-                <span className="relative">Sign up · It’s FREE</span>
+                Sign up · It’s FREE
               </Link>
             </>
           )}
+
+          <button
+            className="flex h-10 w-10 items-center justify-center rounded-full text-2xl text-neutral-100 transition-colors hover:bg-white/10 md:hidden"
+            onClick={() => setMenuOpen((o) => !o)}
+            aria-label={menuOpen ? 'Close menu' : 'Open menu'}
+          >
+            {menuOpen ? '✕' : '☰'}
+          </button>
         </div>
       </nav>
+
+      {menuOpen && (
+        <div className="border-t border-white/10 bg-black/95 px-6 pb-6 pt-3 backdrop-blur-xl md:hidden">
+          <div className="flex flex-col space-y-1">
+            {[
+              { href: '#capabilities', label: 'Features' },
+              { href: '#solutions', label: 'Solutions' },
+              { href: '#workflow', label: 'Workflow' },
+              { href: '/pricing', label: 'Pricing' },
+              { href: '#testimonials', label: 'Creators' },
+              { href: '#faq', label: 'FAQ' },
+            ].map((l) => (
+              <Link
+                key={l.label}
+                href={l.href}
+                onClick={() => setMenuOpen(false)}
+                className="rounded-xl px-3 py-2.5 text-sm text-neutral-300 transition-colors hover:bg-white/5 hover:text-white"
+              >
+                {l.label}
+              </Link>
+            ))}
+            <div className="mt-2 border-t border-white/10 pt-3">
+              {signedIn ? (
+                <Link
+                  href="/dashboard"
+                  onClick={() => setMenuOpen(false)}
+                  className="block rounded-full bg-white px-4 py-2.5 text-center text-sm font-medium text-black transition-colors hover:bg-neutral-200"
+                >
+                  My dashboard
+                </Link>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <Link
+                    href="/auth/login"
+                    onClick={() => setMenuOpen(false)}
+                    className="rounded-full border border-white/15 px-4 py-2.5 text-center text-sm font-medium text-white transition-colors hover:bg-white/5"
+                  >
+                    Sign in
+                  </Link>
+                  <Link
+                    href="/auth/signup"
+                    onClick={() => setMenuOpen(false)}
+                    className="rounded-full bg-white px-4 py-2.5 text-center text-sm font-medium text-black transition-colors hover:bg-neutral-200"
+                  >
+                    Sign up · FREE
+                  </Link>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

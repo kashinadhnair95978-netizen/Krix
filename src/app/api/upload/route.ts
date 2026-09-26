@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase';
 import { getUserId } from '@/lib/auth-utils';
+import { workerUrl } from '@/lib/worker';
 
 export async function POST(req: NextRequest) {
   try {
@@ -66,9 +67,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Trigger processing via background job
+    // Trigger the AI worker pipeline (service-to-service). If the worker is not
+    // configured, fall back to the in-app processing path so the app still works.
+    const workerEndpoint = workerUrl()
+      ? '/api/pipeline/process'
+      : '/api/process-video';
     const { error: processTriggerError } = await fetch(
-      `${process.env.NEXT_PUBLIC_APP_URL}/api/process-video`,
+      `${process.env.NEXT_PUBLIC_APP_URL}${workerEndpoint}`,
       {
         method: 'POST',
         headers: {

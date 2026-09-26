@@ -9,17 +9,17 @@ export const razorpay = new Razorpay({
 export const RAZORPAY_PLANS = {
   basic: {
     planId: 'plan_xxxxx', // Create in Razorpay Dashboard
-    amount: 2900 * 100, // ₹2900 in paise
+    amount: 1500 * 100, // ₹1500 in paise
     interval: 12, // Monthly
   },
   pro: {
     planId: 'plan_xxxxx',
-    amount: 5900 * 100,
+    amount: 2400 * 100,
     interval: 12,
   },
   enterprise: {
     planId: 'plan_xxxxx',
-    amount: 9900 * 100,
+    amount: 7000 * 100,
     interval: 12,
   },
 } as const;

@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { apiClient } from '@/lib/api-client';
 import { Card } from '@/components/ui/Card';
 import { RepurposedContent } from '@/components/dashboard/RepurposedContent';
+import { PipelineProgress } from '@/components/dashboard/PipelineProgress';
+import { GeneratedClips } from '@/components/dashboard/GeneratedClips';
 import { Loading } from '@/components/ui/Loading';
 import { Button } from '@/components/ui/Button';
 import { StatusPill } from '@/components/dashboard/StatusPill';
@@ -78,7 +80,7 @@ export default function VideoContentPage({
         </div>
         {video && (
           <div className="flex shrink-0 items-center gap-3">
-            <StatusPill status={video.status} />
+            <StatusPill status={video.status} stage={video.processing_stage} />
             {video.status === 'failed' && (
               <Button inverse size="sm" onClick={handleRepurpose} loading={repurposing}>
                 {repurposing ? 'Repurposing...' : 'Retry repurposing'}
@@ -108,6 +110,32 @@ export default function VideoContentPage({
             {video.error_message ||
               'Processing failed. Click "Retry repurposing" to try again.'}
           </p>
+        </Card>
+      )}
+
+      {video?.status === 'processing' && video?.processing_stage && (
+        <Card variant="dark" className="mt-6">
+          <h2 className="mb-4 text-lg font-semibold text-white">
+            AI Pipeline
+          </h2>
+          <PipelineProgress
+            stage={video.processing_stage}
+            error={video.error_message ?? undefined}
+          />
+        </Card>
+      )}
+
+      {video?.status === 'completed' && (
+        <Card variant="dark" className="mt-6">
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-white">AI Clips</h2>
+              <p className="mt-0.5 text-sm text-neutral-500">
+                Vertical 9:16 clips clipped and captioned by the AI pipeline.
+              </p>
+            </div>
+          </div>
+          <GeneratedClips videoId={videoId} />
         </Card>
       )}
 

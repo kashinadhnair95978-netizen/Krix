@@ -8,17 +8,17 @@ export const stripe = new Stripe(
 export const STRIPE_PLANS = {
   basic: {
     priceId: 'price_xxxxx', // Create in Stripe Dashboard
-    amount: 2900, // $29
+    amount: 1500, // $15
     interval: 'month',
   },
   pro: {
     priceId: 'price_xxxxx',
-    amount: 5900, // $59
+    amount: 2400, // $24
     interval: 'month',
   },
   enterprise: {
     priceId: 'price_xxxxx',
-    amount: 9900, // $99
+    amount: 7000, // $70
     interval: 'month',
   },
 } as const;

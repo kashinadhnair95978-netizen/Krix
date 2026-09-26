@@ -29,10 +29,10 @@ const plans = [
   {
     id: 'basic',
     name: 'Basic',
-    monthly: 29,
-    annual: 23,
-    priceInrMonthly: 2900,
-    priceInrAnnual: 2320,
+    monthly: 15,
+    annual: 12,
+    priceInrMonthly: 1500,
+    priceInrAnnual: 1200,
     description: 'Perfect for getting started.',
     features: [
       '10 videos per month',
@@ -45,10 +45,10 @@ const plans = [
   {
     id: 'pro',
     name: 'Pro',
-    monthly: 59,
-    annual: 47,
-    priceInrMonthly: 5900,
-    priceInrAnnual: 4720,
+    monthly: 24,
+    annual: 19,
+    priceInrMonthly: 2400,
+    priceInrAnnual: 1900,
     description: 'For creators who post everywhere.',
     features: [
       'Unlimited videos',
@@ -62,10 +62,10 @@ const plans = [
   {
     id: 'enterprise',
     name: 'Enterprise',
-    monthly: 99,
-    annual: 79,
-    priceInrMonthly: 9900,
-    priceInrAnnual: 7920,
+    monthly: 70,
+    annual: 56,
+    priceInrMonthly: 7000,
+    priceInrAnnual: 5600,
     description: 'For teams and agencies.',
     features: [
       'Everything in Pro',

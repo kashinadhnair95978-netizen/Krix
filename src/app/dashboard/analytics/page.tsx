@@ -85,7 +85,7 @@ export default function AnalyticsPage() {
           <div className="mt-6">
             <Sparkline data={posts} />
           </div>
-          <div className="mt-5 flex items-center justify-between border-t border-white/10 pt-4">
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-4">
             <p className="text-sm text-neutral-400">
               {completedVideos} ready videos · {totalVideos} total uploads
             </p>
