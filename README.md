@@ -1,602 +1,782 @@
-# 🎬 Krix
+# Krix
 
-> **Turn 1 video into 100 posts.** An AI content-repurposing SaaS — upload a video once, get tweets, blog posts, email sequences, LinkedIn posts, and rendered 9:16 short-form clips with burned-in captions, generated for every platform.
+> Turn one long video into a content campaign: 9:16 clips with burned-in captions, plus tweets, a blog draft, an email sequence, and LinkedIn posts — all derived from the actual audio and frames of the video.
 
-**Built by [Kashinadh Nair](https://github.com/kashinadhnair95978-netizen)**
-
-| | |
-| --- | --- |
-| **Web app** | Next.js 14 (App Router) · TypeScript (strict) · Tailwind CSS |
-| **Backend** | Supabase (Postgres · Auth · Storage) with Row Level Security |
-| **AI video worker** | Python · FastAPI · PyTorch · FFmpeg — self-hosted on your own GPU |
-| **Content AI** | Any LLM: Claude · OpenAI · Gemini · OpenRouter · any OpenAI-compatible endpoint |
-| **Payments** | Stripe + Razorpay, geo-routed by visitor IP |
-| **Tests** | 78 pytest tests · `tsc --noEmit` clean · `next lint` clean |
+Krix is a Next.js web app plus a **self-hosted GPU video worker**. You upload a video (or paste a YouTube URL), the worker transcribes it, aligns every word to a timestamp, looks at sampled frames, scores candidate clips, renders the best ones to 9:16 MP4 with ASS captions, uploads them, and writes the repurposed text back to the database. The dashboard shows the results.
 
 ---
 
-## 📋 Status legend
+## Contents
 
-This README documents what is **actually implemented**, not what is planned. Every feature is tagged:
+1. [Current status](#-current-status)
+2. [What Krix does today](#-what-krix-does-today)
+3. [Architecture](#-architecture)
+4. [The AI pipeline](#-the-ai-pipeline)
+5. [Data flow](#-data-flow)
+6. [Setup](#-setup)
+7. [Environment variables](#-environment-variables)
+8. [Database](#-database)
+9. [API reference](#-api-reference)
+10. [Security](#-security)
+11. [Testing](#-testing)
+12. [Known limitations](#-known-limitations)
+13. [Repository layout](#-repository-layout)
+14. [Roadmap](#-roadmap)
+15. [Long-term AI direction](#-long-term-ai-direction)
+16. [Development workflow](#-development-workflow)
+17. [Further reading](#further-reading)
+
+---
+
+## 📊 Current status
+
+Statuses are assigned from the code and from test runs recorded in this repository — not from the presence of a button or a page.
 
 | Tag | Meaning |
 | --- | --- |
-| ✅ **WORKING** | Implemented and verified running end-to-end. |
-| 🟡 **SCAFFOLDED** | Real code and UI, but needs credentials/config you must supply, or is a static mockup with no data layer. |
-| 🔵 **PARTIAL** | Implemented and wired, but a stage could not be executed here (e.g. a large model download was aborted). |
-| ⬜ **PLANNED** | Not built. Listed for roadmap context only. |
+| 🟢 **WORKING** | Implemented **and** verified end-to-end by a real test in this repo. |
+| 🟡 **PARTIAL** | Real implementation, but a required piece could not be executed here. |
+| 🟠 **SCAFFOLDED** | UI/route/schema exists; the real functionality is not implemented or is hardcoded data. |
+| 🔴 **BROKEN** | Exists and currently fails. |
+| ⚪ **PLANNED** | Not built. Roadmap context only. |
 
-Read [Known limitations](#-known-limitations--honest-status) before assuming a feature is live.
+### Product areas
+
+| Area | Status | Evidence |
+| --- | --- | --- |
+| Marketing site (`/`, `/pricing`) | 🟢 | 16 components; `/`, `/pricing`, `/auth/login`, `/auth/signup` return 200 |
+| Email/password signup + login | 🟢 | Real Supabase Auth; Playwright `login smoke` passes |
+| Google OAuth | 🔴 | See [limitation 21](#21-google-oauth-callback-passes-the-wrong-value) |
+| Middleware route protection | 🟢 | 9 prefixes guarded in `src/middleware.ts:7` |
+| Local video upload | 🟢 | 10.84 MB MP4 end-to-end in a real browser (TEST 1) |
+| YouTube URL ingestion | 🟡 | Route works; downloads blocked on this machine (limitation 2) |
+| Repeated-URL deduplication | 🟢 | 4 posts → 1 row, same `videoId`, 729–770 ms (TEST 4) |
+| Upload size limit | 🟢 | Live limit is 50 MiB, not 2 GB (limitation 1) |
+| Transcription (Qwen3-ASR) | 🟢 | Real audio → text + word timings |
+| Word alignment (ForcedAligner) | 🟢 | 4,704 aligned words on 60-minute audio |
+| Visual analysis (Qwen3-VL) | 🟢 | Real frames → structured observations |
+| Clip scoring (Mistral 7B) | 🟢 | 6 sub-scores + composite, validated |
+| Clip rendering (FFmpeg) | 🟢 | 2 × 1080×1920 MP4 produced from real video |
+| Captions (ASS, burned in) | 🟢 | Rendered into the video via the `subtitles` filter |
+| Dashboard library / video detail | 🟢 | Real Supabase data, live pipeline progress |
+| Auto content repurposing | 🟡 | Implemented; blocked by OpenRouter credit (limitation 3) |
+| Analytics | 🟡 | Video counts are real; platform/view numbers are hardcoded (limitation 12) |
+| Settings (profile, subscription, AI provider status) | 🟡 | Profile update and `GET /api/ai/config` are real; subscription cancellation hits the API but no plan can exist |
+| Payments (Stripe / Razorpay) | 🟠 | SDK wired, price IDs are `price_xxxxx` placeholders (limitation 8) |
+| Team | 🟠 | Three hardcoded members, no table, no API |
+| Projects | 🟠 | Four hardcoded project names |
+| Calendar / scheduling | 🟠 | Static mock calendar, "Schedule a post" writes nothing |
+| API page (`/dashboard/api`) | 🟠 | Documents `/v1/*` endpoints that do not exist |
+| Inspiration | 🟠 | Static idea cards |
+| Social publishing | ⚪ | Not built. Marketing copy implies it. |
+| Smart Reframe / subject tracking | ⚪ | Not built. Rendering is a fixed center crop. |
+| B-roll insertion | ⚪ | Not built |
+| AI editor | ⚪ | Not built |
+| Brand templates | ⚪ | Not built |
+| MCP server | ⚪ | Not built (landing page mentions it) |
+| Enterprise / fine-tuning | ⚪ | Not built |
+| Social publishing to APIs | ⚪ | Not built |
+
+### What Krix does **not** do
+
+- It does **not** post anything to YouTube, TikTok, Instagram, X, or LinkedIn. There is no publishing integration.
+- It does **not** schedule anything. The calendar is a mockup.
+- It does **not** track real views, watch rate, or platform reach. Only your own video and post counts are real.
+- It does **not** reframe a subject. Clips are center-cropped to 9:16.
+- It does **not** charge anyone. Price IDs are placeholders.
+- It does **not** accept 2 GB uploads. The storage bucket allows 50 MiB.
 
 ---
 
-## ✨ What the website contains
+## ✅ What Krix does today
 
-### Marketing site (public) — ✅ WORKING
+Verified working, in the order the user experiences it:
 
-Single-page landing experience at `/`, composed of 11 sections in `src/components/landing/`:
+1. **Sign in** with email + password (Supabase Auth), or sign up and land in the dashboard.
+2. **Upload a video** (MP4/MOV/WebM, ≤ 50 MiB) or **paste a YouTube URL**. Both create a `videos` row and hand off to the GPU worker.
+3. **The worker transcribes** the audio with Qwen3-ASR, chunked at 300 s with 2 s overlap, then aligns every word with Qwen3-ForcedAligner.
+4. **It looks at the video** with Qwen3-VL on 12 sampled frames (one per 10 s), producing structured observations: speaker count, speaker position, scene type, visual interest.
+5. **Mistral scores candidate clips** on 6 dimensions (hook, story, information, emotion, visual, context independence) and returns strict JSON.
+6. **The server validates** every candidate: duration bounds, 0.5 s end tolerance, 1 s overlap rejection, 20–90 s length, Pydantic score bounds. It re-asks Mistral **once** if everything is invalid — it never widens or invents a range itself.
+7. **FFmpeg renders** the top 3 clips to 1080×1920 h264/aac MP4, center-cropped, with ASS captions burned in, plus a JPEG thumbnail.
+8. **Clips upload** to the private `generated_clips` bucket and rows land in `generated_clips` with `status = 'ready'`.
+9. **The dashboard** shows the clips with signed, expiring URLs, live pipeline stage, and the repurposed text.
+10. **Auto-repurpose** writes 5 content types (`tweets`, `blog`, `emails`, `linkedin`, `shorts`) via a pluggable LLM provider. Implemented and reachable, currently blocked by provider credit.
 
-| Section | Component | What it does |
-| --- | --- | --- |
-| Nav | `Navbar.tsx` | Sticky top nav, anchor links, sign-in / get-started CTAs |
-| Hero | `Hero.tsx` | Headline, animated `BlackHoleBackground`, CTAs, trust stats |
-| CTA | `CTA.tsx` | Mid-page conversion block |
-| Trust | `TrustedBy.tsx` | Logo / social-proof strip |
-| Capabilities | `Capabilities.tsx` | Feature grid; one control is a `ComingSoon` modal |
-| Solutions | `Solutions.tsx` | Use-case table (creators, podcasters, agencies, …) |
-| How it works | `HowItWorks.tsx` | Numbered 3-step explainer |
-| Pricing | `Pricing.tsx` | 4 static tier cards (Free / Basic / Pro / Enterprise) |
-| Testimonials | `Testimonials.tsx` | Creator quotes |
-| FAQ | `FAQ.tsx` | Expandable questions |
-| Footer | `Footer.tsx` | Links + newsletter; one control is a `ComingSoon` modal |
+## ⚪ What Krix is planned to be
 
-Supporting components: `Reveal.tsx` (scroll-triggered fade-up), `SpotlightCard.tsx` (cursor-following glow), `VideoLinkCTA.tsx` (URL input UI), `icons.tsx` (inline SVG set).
+Nothing below is implemented. It is listed so the intended product is not confused with the current one.
 
-> ⚠️ The "paste a video link" inputs in `Hero` / `VideoLinkCTA` are **presentational only** — there is no server route that ingests a remote URL (YouTube, Drive, Vimeo…). See [Known limitations](#-known-limitations--honest-status).
-
-### Auth — ✅ WORKING
-
-| Capability | Status | Implementation |
-| --- | --- | --- |
-| Email + password signup | ✅ | `api/auth/signup` — `auth.admin.createUser` with `email_confirm: true`, then auto sign-in via cookie-writing server client |
-| Email + password login | ✅ | Client-side `browserSupabase.auth.signInWithPassword` (`LoginForm.tsx`) |
-| Google OAuth | ✅ | `signInWithOAuth` → `/auth/callback` → `exchangeCodeForSession` → `POST /api/auth/upsert-profile` (`GoogleSignIn.tsx`) |
-| Logout | ✅ | `api/auth/logout` — `signOut({ scope: 'local' })` + manual Supabase cookie clearing |
-| Profile sync | ✅ | `api/auth/upsert-profile` upserts `users.full_name` / `avatar_url` from OAuth metadata |
-| Route protection | ✅ | `src/middleware.ts` |
-| Service-key bypass | ✅ | `x-service-key` header equals `INTERNAL_SERVICE_KEY` → allowed before any session check |
-
-**Middleware** protects `/dashboard`, `/api/videos`, `/api/upload`, `/api/repurpose`, `/api/subscription`, `/api/ai`, `/api/pipeline`, `/api/clips`. It **fails closed**: if Supabase env vars are missing or still `placeholder`, pages redirect to `/auth/login` and APIs return `401`. Authenticated users hitting `/auth/*` are bounced to `/dashboard`.
-
-### Dashboard — mixed
-
-Sidebar navigation (`Sidebar.tsx`) groups 10 of the 11 dashboard routes:
-
-| Route | Label | Status | Data source |
-| --- | --- | --- | --- |
-| `/dashboard` | Center | ✅ | `apiClient.getVideos()` — stats, recent videos, AI-create tiles |
-| `/dashboard/upload` | Create new | ✅ | `VideoUpload.tsx` — drag & drop, title, 2 GB cap |
-| `/dashboard/videos` | My clips | ✅ | Video library sorted by status, live polling |
-| `/dashboard/content/[videoId]` | Content review | ✅ | `getVideoById` + `repurposeVideo` + `GeneratedClips` |
-| `/dashboard/analytics` | Analytics | ✅ | `useAnalytics()` → **real** `GET /api/analytics` (14-day buckets) |
-| `/dashboard/settings` | Settings | ✅ | `GET /api/ai/config` (active provider), subscription cancel |
-| `/dashboard/calendar` | Calendar | 🟡 | Static mock grid — no scheduler backend |
-| `/dashboard/projects` | My projects | 🟡 | Static cards — reads nothing |
-| `/dashboard/team` | Team | 🟡 | Static member list — no invite/RBAC backend |
-| `/dashboard/api` | API & MCP | 🟡 | Static code snippets — no key-issuance API |
-| `/dashboard/inspiration` | Inspiration | 🟡 | Static template gallery |
-
-Real dashboard components: `Navbar`, `Sidebar`, `CommandPalette` (**⌘K / Ctrl+K**, arrow-key nav, Escape to close), `VideoUpload`, `VideoLibrary`, `RepurposedContent`, `ContentEditor`, `DownloadButton`, `StatusPill`, `PipelineProgress`, `GeneratedClips`, `Sparkline`, `PageHeader`, `icons`.
-
-- **`StatusPill.tsx`** — renders the *live stage* while processing, else the coarse status. Recognises: `completed` (→ "Ready"), `processing`, `failed`, `queued`, `transcribing`, `analyzing`, `finding_clips`, `rendering`.
-- **`PipelineProgress.tsx`** — 6-step checklist driven by `videos.processing_stage`:
-  `1 Upload → 2 Transcription → 3 Video analysis → 4 Finding best clips → 5 Rendering clips → 6 Complete`, with ✕ on the un-reached steps when the stage is `failed`.
-
-### Content repurposing (text) — ✅ WORKING
-
-`POST /api/repurpose` sends the transcript to the active LLM and writes five `repurposed_content` rows per video:
-
-| `content_type` | Output |
-| --- | --- |
-| `tweets` | 10 Twitter/X variations |
-| `blog` | Title + SEO headers + first draft |
-| `emails` | 5-email nurture sequence |
-| `linkedin` | 5 professional posts |
-| `shorts` | 5 short-form scripts (30–60 s) |
-
-The response is force-parsed as JSON via `parseAIJSON()` (strips ` ```json ` fences). Old rows are deleted before insert, so re-running is idempotent. The dashboard's `ContentEditor` lets you edit, copy, and download each asset inline.
-
-### AI video pipeline (`ai-worker/`) — ✅ / 🔵
-
-A self-hosted Python service that turns a raw video into finished vertical clips. **No audio or video ever leaves your machine.** See the [deep dive](#-ai-video-pipeline-deep-dive).
-
-| Stage | Status | Verified on hardware |
-| --- | --- | --- |
-| `ffprobe` metadata + stream validation | ✅ | 39.9 s, 1280×720@24, H.264+AAC |
-| Audio extraction → 16 kHz mono WAV | ✅ | 1.28 MB real output |
-| Frame sampling for visual analysis | ✅ | 4 frames at 0/10/20/30 s |
-| **Qwen3-ASR transcription (CUDA)** | ✅ | Real inference, ~5 s, correct English output |
-| Forced alignment (word timestamps) | 🔵 | Code + fallback verified; model download interrupted at 74 MB |
-| **Qwen3-VL visual analysis** | 🔵 | Real 8-bit implementation; 8.9 GB download aborted |
-| **Mistral clip selection** | 🔵 | Real 4-bit NF4 implementation; 14.5 GB download aborted |
-| Clip validation / dedupe / ranking | ✅ | Correctly enforced `MIN_CLIP_DURATION=20` |
-| ASS/SRT caption generation | ✅ | Real `Dialogue:` events + style block |
-| **FFmpeg 9:16 render + caption burn-in** | ✅ | 1080×1920@30 h264; burn confirmed by pixel diff |
-| FastAPI service + bearer auth | ✅ | `/health` 200, bad key 401, good key 200 |
-| Supabase writes → dashboard clips | 🟡 | Client connects; **migration not yet applied** |
-
-### Payments — 🟡 SCAFFOLDED
-
-Full geo-aware dual-provider integration is implemented, but **every plan ID is a literal placeholder** (`price_xxxxx`, `plan_xxxxx`), so the checkout routes deliberately return `500 "not configured"` until you create real products.
-
-| Plan | Landing price | Stripe | Razorpay |
-| --- | --- | --- | --- |
-| Free | $0 | — | — |
-| Basic | $15/mo · $12 annual | `price_xxxxx` · $15 | `plan_xxxxx` · ₹1500 |
-| Pro | $24/mo · $19 annual | `price_xxxxx` · $24 | `plan_xxxxx` · ₹2400 |
-| Enterprise | $70/mo · $56 annual | `price_xxxxx` · $70 | `plan_xxxxx` · ₹7000 |
-
-- **Geo-routing** — `GET /api/payments/provider` geolocates via MaxMind GeoIP2 and returns `razorpay` for `IN, BD, LK, PK`, else `stripe`. Localhost / empty IP short-circuits to Stripe.
-- **Checkout** — `POST /api/payments/create` validates the plan, detects the provider, creates the customer + subscription, records a `pending` row, and returns `{ provider, subscriptionId, clientSecret | shortUrl }`. `PaymentSelector.tsx` renders `StripeCheckout` or `RazorpayCheckout` to match.
-- **Verify** — `POST /api/payments/verify`. Razorpay recomputes the HMAC-SHA256 over `paymentId|subscriptionId`; Stripe branch does **not** verify a signature (see limitations).
-- **Webhooks** — one `POST /api/payments/webhook` handles both. Stripe: `constructEvent` with `STRIPE_WEBHOOK_SECRET`, then `customer.subscription.created/updated/.deleted` + `invoice.paid`. Razorpay: HMAC over the raw body vs `x-razorpay-signature`, then `subscription.activated/cancelled` + `payment.captured`.
-- **Manage** — `GET/POST /api/subscription` (read / cancel) and `PUT/PATCH /api/subscription/payment-method` (Stripe default PM).
+- Smart Reframe with subject tracking instead of a fixed center crop
+- B-roll insertion from a stock/AI library
+- Real social publishing and scheduling with platform OAuth
+- Real analytics sourced from platform APIs
+- A public REST API and MCP server
+- Team workspaces, seats, and permissions
+- Custom model training ("Krix ClipRank", "Krix ContentWriter")
+- Thumbnails, brand templates, and caption style variants
+- A timeline editor
 
 ---
 
 ## 🏗️ Architecture
 
+Two processes and one managed backend.
+
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Browser                                                             │
-│   Landing (public)  ·  /auth/*  ·  /dashboard/*                     │
-└───────────────────────────────┬──────────────────────────────────────┘
-                                │  @supabase/ssr cookie session
-┌───────────────────────────────▼──────────────────────────────────────┐
-│ Next.js 14 App Router                                               │
-│   src/middleware.ts  → route guard + x-service-key bypass            │
-│   src/app/api/**     → 23 route handlers                             │
-│   src/lib/ai-provider.ts → Claude / OpenAI / Gemini / OpenRouter /  │
-│                            any OpenAI-compatible endpoint            │
-└───────┬──────────────────────────────────────────────┬───────────────┘
-        │ x-service-key (server-to-server)              │ service role
-┌───────▼──────────────────────────┐   ┌───────────────▼───────────────┐
-│ ai-worker/  FastAPI  :8741        │   │ Supabase                     │
-│   transcribe → analyze →          │   │   Postgres + RLS             │
-│   find_clips → render → store     │   │   Auth (email + Google)      │
-│   Qwen3-ASR · Qwen3-VL · Mistral   │   │   Storage: videos,           │
-│   FFmpeg 9:16 + ASS captions      │   │            generated_clips    │
-└───────────────────────────────────┘   └───────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Browser  (user session cookie)                              │
+└───────────────┬──────────────────────────────────────────────┘
+                │  HTTPS
+┌───────────────▼──────────────────────────────────────────────┐
+│  Next.js 14 (App Router, Node)                               │
+│  • Supabase SSR auth + middleware route guard                │
+│  • Route Handlers (/api/*) — service-role client             │
+│  • Local upload + yt-dlp YouTube ingestion (server-side)     │
+│  • RSC + client components for the marketing site & dashboard│
+└──────┬────────────────────────────────────┬──────────────────┘
+       │ PostgREST / Storage API            │ Bearer token (server-to-server only)
+       │ (service role)                     │ AI_WORKER_API_KEY
+┌──────▼─────────────────────────┐  ┌───────▼──────────────────────────┐
+│  Supabase                      │  │  FastAPI worker (uvicorn)         │
+│  • Auth                        │  │  • GPU job queue (1 dispatcher)   │
+│  • Postgres + RLS              │◄─┤  • ModelManager (1 model resident)│
+│  • Storage (private buckets)   │  │  • FFmpeg / ffprobe subprocesses  │
+└──────┬─────────────────────────┘  └───────┬──────────────────────────┘
+       │ service role                          │ service role
+       └──────────────────────────────────────┘
+                Worker → app callback:
+                POST /api/repurpose  with x-service-key
 ```
 
-**Trust boundary:** the browser never talks to the worker. The worker never holds user-facing secrets. The worker re-reads every path from the database and scopes all writes to the `(video_id, user_id)` pair, so a client-supplied path is never trusted.
+**The browser never talks to the worker directly.** `src/lib/worker.ts` holds the base URL and bearer token; only server-side route handlers call it. `/api/pipeline/process` and `/api/process-video` additionally require `x-service-key: INTERNAL_SERVICE_KEY`.
 
-### End-to-end data flow
+### Why the worker is separate
 
-1. **`POST /api/upload`** — validates session, enforces the 2 GB cap, writes the file to the `videos` bucket at `{userId}/{timestamp}-{sanitizedName}` (`cacheControl: 3600`, `upsert: false`, `[^\w.-]` → `_`), inserts a `videos` row with `status='processing'`, then self-calls the pipeline over HTTP with `x-service-key`. Returns `201` immediately — processing is asynchronous.
-2. **Route selection** — if `AI_WORKER_URL` is set → `POST /api/pipeline/process`; otherwise → `POST /api/process-video` (the legacy in-app path).
-3. **`POST /api/pipeline/process`** — re-reads the video from the DB, returns `200` if already `completed`, else sets `status='processing'`, `processing_stage='queued'`, clears `error_message`, stamps `processing_started_at`, and calls `triggerPipeline()`. Returns `202`, or `502` with `fallback_as_available: true` if the worker is unreachable.
-4. **`src/lib/worker.ts`** — POSTs `{video_id, user_id, storage_path, title}` to `${AI_WORKER_URL}/pipeline` with `Authorization: Bearer` and a 15 s `AbortSignal.timeout`. It **never throws** — unconfigured, non-2xx, and network errors all resolve to `{ triggered: false, reason, detail }`.
-5. **Worker `/pipeline`** — returns `{"status":"started"}` immediately and runs the job on a daemon thread. Progress is mirrored to both `videos.processing_stage` and `video_analysis_jobs` so the existing dashboard polling just works.
-6. **Worker stages** — see [pipeline deep dive](#-ai-video-pipeline-deep-dive).
-7. **Dashboard** — polls `GET /api/videos` every 8 s while anything is processing (`useInterval`), rendering `StatusPill` + `PipelineProgress`, and fetches rendered clips from `GET /api/clips?videoId=` (1-hour signed URLs for MP4 + thumbnail).
-8. **Repurpose** — `POST /api/repurpose` reads the worker-populated `videos.transcript`, generates the 5 text formats, writes `repurposed_content`, and marks the video `completed`.
+Four models cannot stay resident on an 8 GB laptop GPU. The worker is a separate process that owns the GPU, loads one model at a time, and writes results straight to Supabase. The Next.js app stays CPU-only and horizontally scalable.
+
+### Model memory management
+
+`ai-worker/app/models/manager.py` is a single-slot cache. Loading a second model evicts the first:
+
+```
+asr          → resident during transcription (cached across chunks)
+asr_aligner  → load evicts asr
+vision       → load evicts asr_aligner
+mistral      → load evicts vision
+unload()     → in the pipeline's finally block
+```
+
+Eviction moves the model to CPU, drops the reference, then `gc.collect()` + `torch.cuda.empty_cache()` + `torch.cuda.synchronize()`. Quantization exists to fit the budget at all, not as an optimization:
+
+| Model | Default quantization | Why |
+| --- | --- | --- |
+| Qwen3-ASR-1.7B | bfloat16 | Small enough to run unquantized |
+| Qwen3-ForcedAligner-0.6B | bfloat16 | Smallest model in the stack |
+| Qwen3-VL-4B-Instruct | 8-bit BitsAndBytes | 4B in fp16 does not fit alongside weights |
+| Mistral-7B-Instruct-v0.3 | 4-bit NF4 + double quant | 7B in fp16 will OOM an 8 GB card |
+
+`ASR_ENABLE_TIMESTAMPS=false` skips the aligner entirely, which removes one load/unload cycle per job at the cost of losing word-level timings.
 
 ---
 
-## 🤖 AI video pipeline deep dive
+## 🤖 The AI pipeline
 
-### Service design
+`POST /pipeline` enqueues a job and returns immediately. The dispatcher thread runs six stages, in this order, updating `videos.processing_stage` as it goes.
 
-| Endpoint | Auth | Purpose |
-| --- | --- | --- |
-| `GET`/`POST /health` | none | `{ status, cuda_available, model_loaded }` |
-| `GET /status` | none | Loaded model, all model IDs, pipeline tuning |
-| `POST /pipeline` | **bearer** | Production entry point. Background daemon thread. |
-| `POST /transcribe` | **bearer** | Debug: ASR only, from a local audio path |
-| `POST /analyze-video` | **bearer** | Debug: frame sampling + VL observations |
-| `POST /find-clips` | **bearer** | Debug: Mistral proposals + validation |
-| `POST /render-clip` | **bearer** | Debug: single 9:16 render |
+### 1. Download and probe
 
-Auth fails **closed**: if `AI_WORKER_AUTH` is enabled and `AI_WORKER_API_KEY` is unset or literally `changeme`, the worker refuses the request rather than allowing it. Every `PipelineError` maps to a structured body — `FORBIDDEN` → `401`, `NOT_FOUND` → `403`, otherwise `500` — with a stable error code so the site never crashes on a worker failure.
+`storage.download_video()` pulls the source from the private `videos` bucket — **after** verifying the row's `user_id` matches the requesting user. Caller-supplied paths are never trusted. `ffprobe` then returns the duration.
 
-### The six stages
+### 2. Transcription and alignment
 
-| # | `processing_stage` | Tool | Output |
-| --- | --- | --- | --- |
-| 0 | *(job created)* | Supabase | `video_analysis_jobs` row, `status='running'` |
-| 1 | `transcribing` | ffprobe → ffmpeg → Qwen3-ASR | `videos.transcript`, `transcript_segments` (jsonb), `duration_seconds` |
-| 2 | `analyzing` | ffmpeg frames → Qwen3-VL | timed visual observations |
-| 3 | `finding_clips` | Mistral-7B | clip candidates + **Krix Clip Quality Score** |
-| 4 | `rendering` | captions + FFmpeg | 9:16 H.264/AAC MP4 with burned ASS captions + thumbnail |
-| 5 | `completed` | Supabase Storage | MP4 + JPG in `generated_clips`, `generated_clips` rows, `videos.status='completed'` |
+- **Model:** `Qwen/Qwen3-ASR-1.7B-hf` via `AutoModelForMultimodalLM`, `bfloat16`, greedy (`do_sample=False`).
+- **Chunking:** `plan_chunks()` splits audio into 300 s windows with a 298 s stride (2 s overlap). A 60-minute video → 13 chunks. A failed chunk is retried as two halves, once.
+- **Stitching:** `merge_chunk_texts()` finds the longest shared token run between the tail of one chunk and the head of the next and removes the duplicate, so overlap does not duplicate words.
+- **Token budget:** `min(ASR_MAX_NEW_TOKENS, duration × ASR_TOKENS_PER_SECOND)`. At defaults a 300 s chunk asks for 2,400 tokens, so the 4,096 ceiling is a safety net rather than a truncator. Long audio is chunked, not cut.
+- **Alignment:** `Qwen/Qwen3-ForcedAligner-0.6B-hf` via `AutoModelForTokenClassification`. Transcript sentences are grouped to ≤ 240 s of audio using character-proportion weighting — the text is known to belong to exactly that audio, which is more reliable than a global words-per-second guess.
+- **Alignment failure is non-fatal:** the warning `forced alignment unavailable, using flat segments` is recorded, the aligner is unloaded, and one flat segment spanning the video is used. `aligner_used: false` tells the UI that timings are approximate.
+- **Words** are made monotonic (sorted, non-overlapping, each ≥ 40 ms) and duplicates from the overlap are removed with a 50 ms tolerance.
+- **Segments** merge consecutive words while the gap is < 0.35 s.
 
-Failure at any stage writes `status='failed'`, `processing_stage='failed'`, and the structured error message, then re-raises. A `finally` block always unloads the model and removes the job directory (unless `AI_WORKER_KEEP_ARTIFACTS=1`).
+### 3. Visual analysis
 
-### Model strategy for 8 GB VRAM
+- **Model:** `Qwen/Qwen3-VL-4B-Instruct`, 8-bit by default.
+- **Frames:** `FRAME_SAMPLE_INTERVAL=10.0` s, `MAX_VISION_FRAMES=12`, one ffmpeg subprocess per frame, `-ss` before `-i` for fast seek, scaled to max width 720, `-q:v 2`.
+- **Per frame:** the image is passed as a raw PIL object in the chat message. The model is asked for JSON: `observation`, `speaker_count`, `speaker_position` (`center|left|right|upper|lower|none`), `scene_type` (`podcast|tutorial|vlog|interview|screen_content|broll|monologue|other`), `visual_interest` (0–1). A parse failure is retried once.
+- **Known weakness:** frames are sampled greedily from the start, so a 1-hour video only analyses its first 120 seconds. All 12 slots are consumed at defaults.
 
-| Role | Checkpoint | bf16 size | Loaded as | Fits 8 GB? |
-| --- | --- | --- | --- | --- |
-| ASR | `Qwen/Qwen3-ASR-1.7B-hf` | ~4.1 GB | bf16 | ✅ verified |
-| Word timing | `Qwen/Qwen3-ForcedAligner-0.6B-hf` | ~1.3 GB | bf16 | ✅ (not executed) |
-| Vision | `Qwen/Qwen3-VL-4B-Instruct` | ~8.9 GB | **8-bit** bitsandbytes (~4.6 GB) | ✅ 8-bit only — fp16 does **not** fit |
-| Reasoning | `mistralai/Mistral-7B-Instruct-v0.3` | ~14.5 GB | **4-bit NF4 + double-quant** (~4.0 GB) | ✅ 4-bit only — 8-bit/fp16 does **not** fit |
+### 4. Clip selection and scoring
 
-`ModelManager` is a single global guarded by a `threading.RLock`. `load(name, factory)` returns the cached model on a cache hit, otherwise evicts the current one (`model.to("cpu")` → `del` → `gc.collect()` → `torch.cuda.empty_cache()` → `torch.cuda.synchronize()`) before building the new one. The enforced order is `asr` → `asr_aligner` → `vision` → `mistral` → `unload()`, so **peak VRAM ≈ one model**.
-
-### Clip scoring & validation
-
-Mistral receives the duration, the timestamped transcript (`[12.4s-48.2s] text`), and the visual observations, and is asked for strict JSON:
+Mistral receives the timestamped transcript and the visual observations and must return:
 
 ```json
-{"clips":[{"start":0,"end":0,"score":0,"hook_score":0,"story_score":0,
-           "information_score":0,"emotion_score":0,"visual_score":0,
-           "context_independence":0,"reason":""}]}
+{"clips":[{"start":0.0,"end":45.0,"score":82.0,
+           "hook_score":80.0,"story_score":85.0,"information_score":78.0,
+           "emotion_score":70.0,"visual_score":88.0,
+           "context_independence":75.0,"reason":"..."}]}
 ```
 
-The system prompt names `score` the **Krix Clip Quality Score** and explicitly states it is *not* a prediction of guaranteed virality. The model is asked for `MAX_CLIPS × 2` proposals so validation has a pool to choose from.
+Every score is Pydantic-bounded 0–100. Mistral-7B is not reliable at this without help, so the output passes through three defenses:
 
-`validate_and_rank()` is a **pure, fully unit-tested** function — nothing the LLM produces is trusted:
+1. **`_iter_json_candidates()`** — `json.JSONDecoder().raw_decode` on the raw text first (stops at the first complete value, so trailing commentary no longer produces `Extra data`), then a fenced-block retry, then a retry at every `{`/`[` offset. A top-level array is wrapped as `{"clips": [...]}`.
+2. **A repair re-ask** — one extra call with an explicit "reply with the JSON object only" suffix. A second failure raises `LLM_INVALID_JSON`.
+3. **`validate_and_rank()`** — pure, unit-tested rejection of: `end <= start`, `end > duration + 0.5`, span < 20 s, span > 90 s, score < `MIN_SCORE`, and anything malformed. Selection is greedy by score up to `MAX_CLIPS` with 1 s overlap rejection; the returned list is then **sorted chronologically**. If everything is rejected, Mistral is asked **once** more with the specific violations named. Nothing is widened server-side.
 
-1. Reject any entry that fails the pydantic `ClipCandidate` schema (scores outside 0–100 are discarded, not clamped).
-2. Drop `start < 0` or `end <= start`.
-3. Drop `end > duration + 0.5` (0.5 s grace).
-4. Drop clips longer than `MAX_CLIP_DURATION` or shorter than `MIN_CLIP_DURATION`.
-5. Drop anything below `MIN_SCORE`.
-6. Sort by score desc, then greedily select up to `MAX_CLIPS`, **rejecting any candidate overlapping an already-selected clip by more than 1.0 s**.
-7. Re-sort the survivors chronologically by start time.
+### 5. Captions and rendering
 
-### Rendering
+- **Captions:** word-timed cues, breaking on 6 words, 32 characters (`CAPTION_MAX_CHARS`), 4.0 s, a 0.6 s pause, or sentence-final punctuation. Written as ASS with a `Krix` style — Arial 72, white, black outline width 3, bottom-centre, margin 120 — and **burned into the video**. The `.ass` file is a temporary artifact and is not uploaded.
+- **Render command** (`rendering.py`):
 
-```
-ffmpeg -y -hide_banner -loglevel error \
-  -ss {start:.3f} -i {source} -t {end-start:.3f} \
-  -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[,subtitles='{escaped.ass}']" \
-  -r 30 -c:v libx264 -preset veryfast -crf 23 \
-  -c:a aac -b:a 128k -shortest -movflags +faststart {out}.mp4
-```
+  ```
+  ffmpeg -y -hide_banner -loglevel error
+    -ss {start} -i {video} -t {duration}
+    -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920[,subtitles='…ass']"
+    -r 30 -c:v libx264 -preset veryfast -crf 23
+    -c:a aac -b:a 128k -shortest -movflags +faststart
+    {output}.mp4
+  ```
 
-`-ss` before `-i` for fast seek. Captions are real ASS: a 23-field `V4+ Styles` block (Arial, bold, bottom-centre, 3 px outline) plus one `Dialogue:` event per cue, with `{`/`}` neutralised so transcript text can never inject an ASS override block. Cue times are **re-based to clip-relative time** by clipping transcript segments to the window. Word-level cues are the fallback when no segment overlaps.
+  1080×1920, 30 fps, CRF 23, AAC 128 kbps, `+faststart`. **`crop` has no `x`/`y`, so it is a center crop** — this is the "no Smart Reframe" limitation. Missing or zero-byte output raises `RENDER_FAILED` instead of escaping as a raw 500.
+- **Thumbnail:** one ffmpeg frame at the clip midpoint, scaled to width 480.
 
-### Structured error contract
+### 6. Storage and callback
 
-`PipelineError` serialises to `{"status":"failed","stage","error_code","message", ...extra}`. 16 codes: `UNSUPPORTED_FILE`, `MODEL_MISSING`, `CUDA_UNAVAILABLE`, `MODEL_OUT_OF_MEMORY`, `CORRUPT_MEDIA`, `TRANSCRIPTION_FAILED`, `VISION_FAILED`, `LLM_INVALID_JSON`, `CLIP_VALIDATION_FAILED`, `RENDER_FAILED`, `STORAGE_UPLOAD_FAILED`, `WRITE_FAILED`, `NOT_FOUND`, `FORBIDDEN`, `BAD_REQUEST`, `PIPELINE_INTERNAL`. Stages: `auth`, `storage`, `media`, `models`, `transcription`, `analyzing`, `finding_clips`, `rendering`, `pipeline`.
+Clips and thumbnails upload to the private `generated_clips` bucket under `{user_id}/clips/`, and `generated_clips` rows are written with `status = 'ready'`. Then, if `REPURPOSE_ON_COMPLETE` is on, the worker POSTs to `{KRIX_APP_URL}/api/repurpose` with the internal service key. **The callback never raises** — a repurposing failure must not turn a successfully rendered video into a failed one. Its result is embedded in the pipeline response as `repurpose: {triggered, reason, …}`.
 
----
+### Failure handling
 
-## 🧠 AI provider layer
+Every error is a `PipelineError` with an `error_code` that maps to an HTTP status. Messages pass through a 4-pass sanitizer that redacts JWTs, key-shaped strings, bearer tokens, and `*_KEY=…` / `*_SECRET=…` / `*_TOKEN=…` / `*_PASSWORD=…` assignments before they can reach a log or a response.
 
-`src/lib/ai-provider.ts` — one `generateText(system, user, opts)` over five providers:
-
-| `AI_PROVIDER` | Key env | Model env | Default model | Transport |
-| --- | --- | --- | --- | --- |
-| `anthropic` | `ANTHROPIC_API_KEY` | `ANTHROPIC_MODEL` | `claude-opus-4-1` | `/v1/messages`, `x-api-key`, `anthropic-version: 2023-06-01` |
-| `openai` | `OPENAI_API_KEY` | `OPENAI_MODEL` | `gpt-4o-mini` | `/chat/completions` |
-| `gemini` | `GEMINI_API_KEY` | `GEMINI_MODEL` | `gemini-2.0-flash` | `v1beta/models/{model}:generateContent?key=` |
-| `openrouter` | `OPENROUTER_API_KEY` | `OPENROUTER_MODEL` | `anthropic/claude-3.5-sonnet` | `openrouter.ai/api/v1/chat/completions` |
-| `custom` | `AI_API_KEY` | `AI_MODEL` | `gpt-4o-mini` | `AI_BASE_URL` (default Groq) |
-
-- `AI_PROVIDER=auto` (default) picks the **first provider with a key present**, in table order.
-- Model resolution: provider-specific env → `AI_MODEL` → that provider's default.
-- `GET /api/ai/config` exposes the resolved provider, model, and base URL (middleware-protected) — the Settings page shows it.
-- All responses are normalised and force-parsed by `parseAIJSON()`, which strips ` ```json ` fences. Network failures, non-2xx, and empty responses all throw descriptive errors.
-
-The worker is a **separate** concern: `ai-worker/` never calls a cloud LLM. Local ASR/VL/Mistral handle video, and cloud providers handle only the text repurposing step.
-
----
-
-## 🗄️ Database
-
-Run these in order in the Supabase SQL editor.
-
-### `src/components/supabase/schema.sql` — base
-
-| Table | Purpose | Key columns |
+| Stage | Code | HTTP |
 | --- | --- | --- |
-| `users` | Profile mirror of the auth user | `id` (PK = auth uid), `email` UNIQUE, `full_name`, `avatar_url`, `country_code`, `timezone` |
-| `videos` | Uploads + processing state | `user_id` FK CASCADE, `title`, `original_url`, `storage_path`, `duration_seconds`, `transcript`, `status`, `processing_started_at`, `processing_ended_at`, `error_message` |
-| `repurposed_content` | Generated assets | `video_id` FK CASCADE, `content_type`, `content_text`, `content_url`, `is_edited`, `edited_by_user_at`, `posted_to_platform`, `posted_at` |
-| `subscriptions` | Billing state | `user_id`, `plan`, `status`, `payment_method`, `payment_id`, `recurring_id`, period dates, `cancel_at_period_end`, `monthly_price`, `currency` · `UNIQUE(user_id, recurring_id)` |
-| `payments` | Ledger | `user_id`, `amount`, `currency`, `payment_method`, `external_payment_id`, `status`, `invoice_url`, `receipt_url`, `error_message` |
-| `usage_logs` | Monthly metering | `video_processed_count`, `api_calls`, `storage_used_mb`, `month` · `UNIQUE(user_id, month)` |
-| `api_keys` | Hashed server keys | `key_hash` UNIQUE, `name`, `last_used_at`, `is_active` |
+| request | `BAD_REQUEST` | 400 |
+| request | `FORBIDDEN` | 401 |
+| storage | `NOT_FOUND` | 403 ⚠️ see limitation 15 |
+| pipeline | `BUSY` | 429 |
+| any | `UNSUPPORTED_FILE`, `MODEL_MISSING`, `CUDA_UNAVAILABLE`, `MODEL_OUT_OF_MEMORY`, `CORRUPT_MEDIA`, `TRANSCRIPTION_FAILED`, `VISION_FAILED`, `LLM_INVALID_JSON`, `CLIP_VALIDATION_FAILED`, `RENDER_FAILED`, `STORAGE_UPLOAD_FAILED`, `WRITE_FAILED`, `PIPELINE_INTERNAL` | 500 |
 
-**RLS:** enabled on all seven. `users` (select/update own), `videos` (full CRUD own), `subscriptions` (select/insert own — service role writes), `repurposed_content` (full CRUD via `video_id IN (SELECT id FROM videos WHERE user_id = auth.uid())`). `payments`, `usage_logs`, `api_keys` are enabled with **zero policies** — service-role only, by design.
+The job's `finally` block unloads the model, frees the CUDA cache, and deletes the scratch directory unless `AI_WORKER_KEEP_ARTIFACTS=true`. Bookkeeping writes (`update_job`, `finalize_video`) are best-effort and warn rather than fail the job.
 
-**Storage:** private `videos` bucket with INSERT/SELECT/DELETE policies gated on `bucket_id = 'videos' AND auth.uid()::text = (storage.foldername(name))[1]` — the first path segment must be the owner's uid.
+### Backpressure
 
-Indexes: `idx_videos_user_id`, `idx_subscriptions_user_id`, `idx_repurposed_content_video_id`, `idx_payments_user_id`. Extension: `uuid-ossp`.
-
-### `src/components/supabase/ai_pipeline.sql` — additive migration
-
-**Run this second.** Adds two columns and three tables; drops nothing and weakens no existing policy.
-
-| Change | Detail |
-| --- | --- |
-| `videos.processing_stage` | `VARCHAR(50) NOT NULL DEFAULT 'uploaded'` |
-| `videos.transcript_segments` | `JSONB` — `{ language, segments[], words[] }` |
-| `clip_candidates` | `video_id`, **`user_id NOT NULL`**, `start_time`, `end_time`, `score`, `hook_score`, `story_score`, `information_score`, `emotion_score`, `visual_score`, `context_independence`, `reason` |
-| `generated_clips` | `video_id`, `user_id`, `candidate_id` (FK `ON DELETE SET NULL`), `storage_path`, `thumb_path`, `duration`, `aspect_ratio` (default `9:16`), `caption_style`, `status` (default `ready`) |
-| `video_analysis_jobs` | `job_id` UNIQUE, `video_id`, `user_id`, `status`, `stage`, `error_code`, `error_message` |
-| `generated_clips` bucket | Private, same `{userId}/...` first-segment ownership policies |
-
-RLS: 4 policies each on `clip_candidates` and `generated_clips` (select/insert/update/delete, owned through the video). `video_analysis_jobs` gets **select + insert only** — job progress is written by the service role, never by a client. Indexes: `idx_clip_candidates_video_id`, `idx_generated_clips_video_id`, `idx_video_analysis_jobs_video_id`, `idx_videos_processing_stage`.
+`GPU_QUEUE_MAX_PENDING=16` counts the running job **plus** the backlog, guarded by an explicit counter so the capacity check cannot race the dispatcher. Overflow raises `BUSY` → HTTP 429. A separate GPU lease with a 3,600 s timeout serialises the debug endpoints against the pipeline thread.
 
 ---
 
-## 🚀 Quick start
+## 🔄 Data flow
 
-### 1. Web app
+**Local upload**
+```
+User picks a file
+  → GET  /api/upload          (returns the live limit so the UI can fail fast)
+  → POST /api/upload          (validates type + size, streams to the private bucket,
+                               creates the videos row, triggers the worker)
+  → 201 {videoId, pipelineTriggered:true}
+  → GET  /api/videos/[id]     (polls: status + processing_stage)
+  → GET  /api/clips?videoId=  (signed, expiring clip + thumbnail URLs)
+  → GET  /api/content         (repurposed text, by type)
+```
+
+**YouTube URL**
+```
+User pastes a URL
+  → POST /api/ingest-url  {url}
+      canonicalise → YouTube-only validation → non-blocking single-flight lock
+      → duplicate check (active | completed | recent failure | stale)
+      → reserve a row BEFORE downloading  ← the fix for the old repeat-import bug
+      → yt-dlp with a 240 s wall-clock budget
+      → same storage + pipeline path as upload
+  → 200 {deduplicated:true, videoId} | 202 {videoId} | 504 {DOWNLOAD_TIMEOUT}
+```
+
+**Worker → dashboard**
+```
+POST /pipeline (Bearer)
+  → 200 {status:"started", job_id, queue_position}
+  → dispatch: transcribe → analyze → find_clips → render → store
+  → repurpose_callback POST /api/repurpose (x-service-key)
+  → dashboard polls the DB; it never polls the worker
+```
+
+**The duplicate-import bug this design fixes:** the old code checked only *active* statuses and created the `videos` row *after* the download, so submitting a URL already in the library re-downloaded it — four such rows existed in the live database. Now the row is reserved first, the canonical URL is the dedupe key, and a repeat returns the existing `videoId` in ~0.7 s.
+
+---
+
+## 🛠️ Setup
+
+### Requirements
+
+| | |
+| --- | --- |
+| Node.js | 18.17+ (Next.js 14 requirement) |
+| Python | 3.11–3.12 (the worker venv on this machine is 3.12) |
+| GPU | NVIDIA with CUDA. **An 8 GB card is the design target** (RTX 4060 Laptop). |
+| FFmpeg | On `PATH`, **built with libass** (required for caption burn-in) + `ffprobe` |
+| yt-dlp | On `PATH` for YouTube ingestion, or set `YTDLP_PATH` |
+| Supabase | One project, with the two SQL files applied |
+
+FFmpeg with libass is the one easy-to-miss dependency: without it caption rendering fails at the `subtitles` filter.
+
+### Web application
 
 ```bash
 npm install
-cp .env.example .env.local      # then fill in Supabase + at least one AI key
-npm run dev                     # http://localhost:3000
+cp .env.example .env.local        # then fill it in
+npm run dev                       # http://localhost:3000
+npm run lint                      # next lint
+npx tsc --noEmit                  # typecheck (no npm script exists)
+npm run build && npm run start    # production
 ```
 
-### 2. Database
-
-In the Supabase SQL editor, run `src/components/supabase/schema.sql`, then `src/components/supabase/ai_pipeline.sql`. Without the second file the worker's clip stages fail — `/api/clips` and the `clip_candidates` / `generated_clips` / `video_analysis_jobs` tables won't exist.
-
-### 3. AI video worker (optional but recommended)
-
-Requires **Python 3.12+**, an **NVIDIA GPU with ≥ 8 GB VRAM**, and **FFmpeg with libass** on `PATH`.
+### AI worker
 
 ```bash
 cd ai-worker
 python -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements.txt
-copy .env.example .env          # set AI_WORKER_API_KEY + Supabase service role key
+.\.venv\Scripts\python -m pip install -r requirements.txt   # Windows
 .\.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8741
 ```
 
-First run downloads ~28 GB of weights
-(ASR 4.1 + aligner 1.2 + vision 8.9 + Mistral 14.5). Then set the **matching** `AI_WORKER_URL` + `AI_WORKER_API_KEY` in the root `.env.local`. Leave `AI_WORKER_URL` blank to fall back to the in-app OpenAI-Whisper path. Full reference: [`ai-worker/README.md`](ai-worker/README.md).
-
-### 4. Build & deploy
+Then check it:
 
 ```bash
-npm run build
-npm run start
+curl http://127.0.0.1:8741/health
+# {"status":"ok","cuda_available":true,"model_loaded":null,"pipeline":true,
+#  "queue":{"worker_running":true,"pending":0,"outstanding":0,"gpu_busy":false,"max_pending":16}}
 ```
+
+The first run downloads the model weights — roughly 4 GB (ASR), 1.2 GB (aligner), 8.9 GB (VL), 14.5 GB (Mistral) as recorded in `ai-worker/work/download.log`. Budget the disk and the time. Set `HF_HOME` **in your shell** to control the cache directory; the worker reads it from `config.py` but does not export it to `os.environ` itself.
+
+### Supabase
+
+Apply these two files in the Supabase **SQL Editor**, in order:
+
+1. `src/components/supabase/schema.sql` — users, subscriptions, videos, repurposed_content, payments, usage_logs, api_keys, and the `videos` bucket. Not idempotent; run once.
+2. `src/components/supabase/ai_pipeline.sql` — `clip_candidates`, `generated_clips`, `video_analysis_jobs`, the `generated_clips` bucket, the `videos.processing_stage` CHECK, the `set_updated_at` trigger, the RLS policies, and the unique index `/api/repurpose` needs. Idempotent; safe to re-run.
+
+Then confirm the live schema:
+
+```bash
+node ai-worker/scripts/check-supabase.mjs
+```
+
+`SUPABASE_SERVICE_ROLE_KEY` bypasses RLS and can **read and write every user's rows**. It belongs only in the worker and in server-side route handlers — never in a `NEXT_PUBLIC_` variable, and never in a component.
+
+### Models
+
+| Role | Hugging Face id | Default quantization |
+| --- | --- | --- |
+| ASR | `Qwen/Qwen3-ASR-1.7B-hf` | bfloat16 |
+| Forced aligner | `Qwen/Qwen3-ForcedAligner-0.6B-hf` | bfloat16 |
+| Video understanding | `Qwen/Qwen3-VL-4B-Instruct` | 8-bit |
+| Clip reasoning | `mistralai/Mistral-7B-Instruct-v0.3` | 4-bit NF4 |
+| Repurposing text | remote LLM (OpenRouter by default) | n/a |
+
+All four local ids are overridable (`ASR_MODEL`, `ASR_ALIGNER_MODEL`, `VISION_MODEL`, `MISTRAL_MODEL`).
 
 ---
 
 ## 🔑 Environment variables
 
-### Web app (`.env.example`)
+Only the variables that matter are listed. `NEXT_PUBLIC_` variables are exposed to the browser — **never put a secret in one**. Values shown are defaults or placeholders; no real key appears in this repository's tracked files.
 
-| Variable | Required | Purpose |
+### Next.js (`.env.local`)
+
+| Variable | Required | Used by | Purpose |
+| --- | --- | --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | browser + server | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | browser | anon/bearer key (RLS applies) |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | API routes | bypasses RLS — server only |
+| `INTERNAL_SERVICE_KEY` | ✅ for s2s | middleware, `/api/pipeline/process`, `/api/process-video`, `/api/repurpose` | `x-service-key` value |
+| `AI_WORKER_URL` | for the GPU path | `lib/worker.ts` | e.g. `http://127.0.0.1:8741`. Blank ⇒ Whisper fallback |
+| `AI_WORKER_API_KEY` | for the GPU path | `lib/worker.ts` | worker `Authorization: Bearer` |
+| `NEXT_PUBLIC_APP_URL` | recommended | `api-client.ts`, `next.config.mjs` | browser-facing base URL |
+| `KRIX_APP_URL` | recommended | server→server calls | base URL for the worker's callback |
+| `OPENROUTER_API_KEY` | for repurposing | `lib/ai-provider.ts` | the working provider in this repo |
+| `OPENROUTER_MODEL` | optional | `lib/ai-provider.ts` | default `anthropic/claude-sonnet-4`, validated against the live catalog |
+| `AI_PROVIDER` | optional | `lib/ai-provider.ts` | `auto` \| `anthropic` \| `openai` \| `gemini` \| `openrouter` \| `custom` |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | optional | `lib/ai-provider.ts` | Claude path |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | optional | `lib/ai-provider.ts`, `lib/transcribe.ts` | GPT path + legacy Whisper transcription |
+| `GEMINI_API_KEY` / `GEMINI_MODEL` | optional | `lib/ai-provider.ts` | Gemini path |
+| `AI_API_KEY` + `AI_BASE_URL` + `AI_MODEL` | optional | `lib/ai-provider.ts` | any OpenAI-compatible endpoint; `AI_BASE_URL` outranks auto-detect |
+| `UPLOAD_MAX_BYTES` | optional | `lib/ingest.ts` | app ceiling, default 2 GiB |
+| `STORAGE_MAX_BYTES` | optional | `lib/ingest.ts` | fallback when the bucket reports no `file_size_limit`, default 50 MiB |
+| `YTDLP_PATH` | optional | `lib/ytdlp.ts` | yt-dlp executable |
+| `FFPROBE_PATH` | optional | `lib/ytdlp.ts` | ffprobe executable |
+| `YTDLP_COOKIES_FILE` | optional | `lib/ytdlp.ts` | Netscape `cookies.txt` for age/bot-gated videos |
+| `YTDLP_COOKIES_FROM_BROWSER` | optional | `lib/ytdlp.ts` | e.g. `chrome` |
+| `INGEST_MAX_BYTES` | optional | ingest route | download size cap, default 50 MiB |
+| `INGEST_MAX_DURATION_SECONDS` | optional | ingest route | source duration cap, default 5400 (90 min) |
+| `INGEST_TIMEOUT_SECONDS` | optional | `lib/ytdlp.ts` | per-attempt yt-dlp timeout, default 900 |
+| `INGEST_REQUEST_BUDGET_SECONDS` | optional | ingest route | whole-request wall clock, default 240, clamped under `maxDuration = 300` |
+| `INGEST_RETRY_COOLDOWN_SECONDS` | optional | `lib/ingest-dedupe.ts` | failed-import cooldown, default 600 |
+| `INGEST_LOCK_TTL_SECONDS` | optional | `lib/ingest-dedupe.ts` | single-flight lock TTL, default 1200 |
+| `INGEST_STALE_SECONDS` | optional | `lib/ingest-dedupe.ts` | dead-job retirement, default 1800 |
+| `STRIPE_SECRET_KEY` / `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` / `STRIPE_WEBHOOK_SECRET` | for billing | `lib/stripe.ts`, `/api/payments/*` | placeholders today |
+| `RAZORPAY_KEY_ID` / `NEXT_PUBLIC_RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | for billing | `lib/razorpay.ts`, `/api/payments/*` | placeholders today |
+| `MAXMIND_ACCOUNT_ID` / `MAXMIND_LICENSE_KEY` | optional | `lib/geoip.ts` | provider routing by country |
+
+### Worker (`ai-worker/.env`)
+
+| Variable | Default | Purpose |
 | --- | --- | --- |
-| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | Browser-safe anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | Server-only; bypasses RLS in all API routes |
-| `AI_PROVIDER` | — | `auto` (default) or `anthropic`\|`openai`\|`gemini`\|`openrouter`\|`custom` |
-| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | one of | Claude text generation |
-| `OPENAI_API_KEY` / `OPENAI_MODEL` | one of | GPT text generation · also Whisper on the fallback path |
-| `GEMINI_API_KEY` / `GEMINI_MODEL` | one of | Gemini text generation |
-| `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` | one of | Any model via OpenRouter |
-| `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` | one of | Any OpenAI-compatible endpoint (Groq, Together, Ollama, LM Studio…) |
-| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` | payments | Stripe client key |
-| `STRIPE_SECRET_KEY` | payments | Stripe server key |
-| `STRIPE_WEBHOOK_SECRET` | payments | Verifies `constructEvent` |
-| `NEXT_PUBLIC_RAZORPAY_KEY_ID` | payments | Razorpay client key |
-| `RAZORPAY_KEY_SECRET` | payments | Razorpay server key + webhook HMAC |
-| `MAXMIND_ACCOUNT_ID` / `MAXMIND_LICENSE_KEY` | payments | GeoIP2 city lookup → provider choice |
-| `NEXT_PUBLIC_APP_URL` | ✅ | Base URL for server-to-server self-calls |
-| `INTERNAL_SERVICE_KEY` | ✅ | `x-service-key` for upload → pipeline → repurpose. `openssl rand -hex 32` |
-| `AI_WORKER_URL` | worker | e.g. `http://127.0.0.1:8741`. Blank disables the worker path |
-| `AI_WORKER_API_KEY` | worker | Bearer token; must equal the worker's `AI_WORKER_API_KEY` |
+| `AI_WORKER_API_KEY` | `""` | required bearer token; the literal `changeme` is rejected |
+| `AI_WORKER_AUTH` | `true` | set `false` only for local dev without auth |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `""` | required |
+| `SUPABASE_VIDEOS_BUCKET` / `SUPABASE_CLIPS_BUCKET` | `videos` / `generated_clips` | bucket names |
+| `ASR_MODEL`, `ASR_ALIGNER_MODEL`, `VISION_MODEL`, `MISTRAL_MODEL` | the ids above | model overrides |
+| `ASR_DEVICE`, `VISION_DEVICE`, `MISTRAL_DEVICE` | `cuda` | `cuda` or `cpu`; requesting `cuda` without CUDA raises `CUDA_UNAVAILABLE` |
+| `ASR_CHUNK_SECONDS`, `ASR_CHUNK_OVERLAP_SECONDS`, `ASR_TOKENS_PER_SECOND`, `ASR_MAX_NEW_TOKENS` | `300.0`, `2.0`, `8.0`, `4096` | transcription chunking |
+| `ASR_ENABLE_TIMESTAMPS`, `ASR_ALIGN_CHUNK_SECONDS` | `true`, `240.0` | forced alignment |
+| `VISION_QUANTIZATION`, `VISION_MAX_NEW_TOKENS` | `8bit`, `256` | visual analysis |
+| `MISTRAL_QUANTIZATION`, `MISTRAL_MAX_NEW_TOKENS`, `MISTRAL_MAX_INPUT_TOKENS` | `4bit`, `900`, `16384` | clip reasoning |
+| `MAX_CLIPS`, `MIN_CLIP_DURATION`, `MAX_CLIP_DURATION`, `MIN_SCORE` | `3`, `20.0`, `90.0`, `0.0` | clip selection bounds |
+| `FRAME_SAMPLE_INTERVAL`, `MAX_VISION_FRAMES`, `VISION_START_OFFSET` | `10.0`, `12`, `0.0` | frame sampling |
+| `RENDER_WIDTH`, `RENDER_HEIGHT`, `RENDER_FPS`, `RENDER_CRF`, `RENDER_AUDIO_BITRATE` | `1080`, `1920`, `30`, `23`, `128k` | rendering |
+| `CAPTION_FONT_SIZE`, `CAPTION_FONT_COLOR`, `CAPTION_OUTLINE_COLOR`, `CAPTION_OUTLINE_WIDTH`, `CAPTION_MARGIN_BOTTOM`, `CAPTION_MAX_CHARS`, `CAPTION_STYLE_NAME` | `72`, `&HFFFFFF`, `&H000000`, `3`, `120`, `32`, `Krix` | captions |
+| `GPU_QUEUE_MAX_PENDING`, `GPU_QUEUE_STATUS_LIMIT`, `GPU_LEASE_TIMEOUT` | `16`, `25`, `3600.0` | queue limits |
+| `KRIX_APP_URL`, `INTERNAL_SERVICE_KEY`, `REPURPOSE_ON_COMPLETE`, `REPURPOSE_TIMEOUT` | `http://localhost:3000`, `""`, `true`, `300.0` | repurpose callback |
+| `FFMPEG_PATH`, `FFPROBE_PATH` | `ffmpeg`, `ffprobe` | binaries |
+| `AI_WORKER_WORK_DIR`, `AI_WORKER_KEEP_ARTIFACTS` | `ai-worker/work`, `false` | scratch space |
+| `HF_HOME`, `HF_TOKEN` | `""`, `""` | cache dir (export in your shell) and gated repos |
 
-### Worker (`ai-worker/.env.example`) — 50+ knobs, all optional
+`APP_BASE_URL` and `SUPABASE_TIMEOUT` appear in `ai-worker/.env.example` but **are not read** by `config.py`; `MIN_SCORE` is read but missing from that example.
 
-| Group | Keys | Defaults |
+### Test-only
+
+`KRIX_E2E_EMAIL`, `KRIX_E2E_PASSWORD`, `KRIX_E2E_VIDEO`, `KRIX_E2E_YOUTUBE`, `KRIX_E2E_YOUTUBE_FRESH`, and the `RUN_REAL_ASR` / `RUN_REAL_VL` / `RUN_REAL_E2E` / `RUN_REAL_LONG` GPU gates. The E2E password has a hardcoded default for a throwaway account; do not reuse it anywhere real.
+
+---
+
+## 🗄️ Database
+
+Ten tables, two private buckets, RLS on everything.
+
+| Table | Purpose | Key columns |
 | --- | --- | --- |
-| Server | `AI_WORKER_HOST`, `AI_WORKER_PORT`, `AI_WORKER_API_KEY`, `AI_WORKER_AUTH` | `127.0.0.1`, `8741`, —, `true` |
-| Supabase | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_VIDEOS_BUCKET`, `SUPABASE_CLIPS_BUCKET`, `SUPABASE_TIMEOUT` | —, —, `videos`, `generated_clips`, `120` |
-| Work dir | `AI_WORKER_WORK_DIR`, `AI_WORKER_KEEP_ARTIFACTS` | `ai-worker/work`, `false` |
-| FFmpeg | `FFMPEG_PATH`, `FFPROBE_PATH` | `ffmpeg`, `ffprobe` (autodetected on PATH) |
-| Render | `RENDER_WIDTH`, `RENDER_HEIGHT`, `RENDER_FPS`, `RENDER_CRF`, `RENDER_AUDIO_BITRATE` | `1080`, `1920`, `30`, `23`, `128k` |
-| ASR | `ASR_MODEL`, `ASR_ALIGNER_MODEL`, `ASR_DEVICE`, `ASR_LANGUAGE`, `ASR_MAX_NEW_TOKENS`, `ASR_ENABLE_TIMESTAMPS`, `ASR_ALIGN_CHUNK_SECONDS` | `Qwen/Qwen3-ASR-1.7B-hf`, `Qwen/Qwen3-ForcedAligner-0.6B-hf`, `cuda`, auto, `512`, `true`, `240` |
-| Vision | `VISION_MODEL`, `VISION_DEVICE`, `VISION_QUANTIZATION`, `VISION_MAX_NEW_TOKENS` | `Qwen/Qwen3-VL-4B-Instruct`, `cuda`, `8bit`, `256` |
-| Mistral | `MISTRAL_MODEL`, `MISTRAL_DEVICE`, `MISTRAL_QUANTIZATION`, `MISTRAL_MAX_NEW_TOKENS` | `mistralai/Mistral-7B-Instruct-v0.3`, `cuda`, `4bit`, `900` |
-| Pipeline | `MAX_CLIPS`, `MIN_CLIP_DURATION`, `MAX_CLIP_DURATION`, `MIN_SCORE`, `FRAME_SAMPLE_INTERVAL`, `MAX_VISION_FRAMES`, `VISION_START_OFFSET` | `3`, `20`, `90`, `0.0`, `10`, `12`, `0.0` |
-| Captions | `CAPTION_FONT_SIZE`, `CAPTION_FONT_COLOR`, `CAPTION_OUTLINE_COLOR`, `CAPTION_OUTLINE_WIDTH`, `CAPTION_MARGIN_BOTTOM`, `CAPTION_MAX_CHARS`, `CAPTION_STYLE_NAME` | `72`, `FFFFFF`, `000000`, `3`, `120`, `32`, `Krix` |
-| HuggingFace | `HF_HOME`, `HF_TOKEN` | —, — |
+| `users` | app profile mirror of `auth.users` | `id` = `auth.users.id`, `full_name`, `avatar_url` |
+| `videos` | **core** — one row per source video | `original_url` (canonical, dedupe key), `storage_path`, `duration_seconds`, `transcript`, `transcript_segments` (JSONB: language + segments + words), `status` (`processing`\|`completed`\|`failed`), `processing_stage` (CHECK: 12 values), `error_message` |
+| `video_analysis_jobs` | one row per pipeline run, polled by the dashboard | `job_id` (UNIQUE), `status`, `stage`, `error_code`, `error_message` |
+| `clip_candidates` | every model proposal, kept even when not selected | `start_time`, `end_time`, `score`, `hook_score`, `story_score`, `information_score`, `emotion_score`, `visual_score`, `context_independence`, `reason`; CHECK `end_time > start_time` |
+| `generated_clips` | rendered output | `candidate_id` → `clip_candidates`, `storage_path`, `thumb_path`, `duration`, `aspect_ratio`, `caption_style`, `status = 'ready'` |
+| `repurposed_content` | generated text per video | `content_type` (UNIQUE with `video_id`), `content_text`, `is_edited`, `edited_by_user_at`, `posted_to_platform`, `posted_at` |
+| `subscriptions` | billing state | `recurring_id` (UNIQUE with `user_id`), `status`, `current_period_start/end`, `cancel_at_period_end` |
+| `payments` | payment attempts | `subscription_id`, `amount`, `currency`, `payment_method`, `external_payment_id`, `status`, `invoice_url` |
+| `usage_logs` | per-user per-month metered usage | UNIQUE (`user_id`, `month`) |
+| `api_keys` | hashed user keys | `key_hash`, `is_active` |
+
+**Relationships:** `videos.user_id → users.id` (CASCADE); `clip_candidates`, `generated_clips`, `video_analysis_jobs`, `repurposed_content` all reference `videos.id` (CASCADE); `generated_clips.candidate_id → clip_candidates.id` (SET NULL).
+
+**Enums:** none. Every status column is `VARCHAR(50)`; only `videos.processing_stage` has a CHECK constraint. `video_analysis_jobs.stage` has no constraint, so the stage vocabulary can drift from `videos` (limitation 16).
+
+**`updated_at`** is maintained by the `set_updated_at` DB trigger on `videos` and `video_analysis_jobs` only. `generated_clips` and `repurposed_content` have no such column or trigger.
+
+**Buckets:** `videos` and `generated_clips`, both **private**, both requiring the first path segment to equal `auth.uid()`. Neither SQL file sets `file_size_limit`, so both inherit the plan default — that is where the 50 MiB cap comes from.
+
+**RLS:** 29 policies. `videos` and `users` are self-scoped (`auth.uid() = user_id`). `repurposed_content`, `clip_candidates`, `generated_clips`, and `video_analysis_jobs` scope through a `videos` subquery. `payments`, `usage_logs`, and `api_keys` have RLS enabled with **zero policies**, so they are service-role only. There is no `storage.objects` UPDATE policy and no `video_analysis_jobs` DELETE policy.
+
+Full DDL: `src/components/supabase/schema.sql`, `src/components/supabase/ai_pipeline.sql`.
 
 ---
 
 ## 🔌 API reference
 
-### Auth
-| Method | Path | Auth | Description |
-| --- | --- | --- | --- |
-| `POST` | `/api/auth/signup` | public | Create account + auto sign-in |
-| `POST` | `/api/auth/login` | public | Password sign-in |
-| `POST` | `/api/auth/logout` | session | Sign out + clear cookies |
-| `POST` | `/api/auth/upsert-profile` | session | Upsert profile from OAuth metadata |
+### App routes
 
-### Video & content
-| Method | Path | Auth | Description |
+| Method | Path | Auth | Status |
 | --- | --- | --- | --- |
-| `POST` | `/api/upload` | session | Upload file (≤ 2 GB) → storage + `videos` row + trigger |
-| `POST` | `/api/pipeline/process` | `x-service-key` | Start the worker pipeline (`202`) |
-| `POST` | `/api/process-video` | `x-service-key` | Legacy in-app Whisper fallback path |
-| `POST` | `/api/repurpose` | `x-service-key` or session | Generate the 5 text formats from the transcript |
-| `GET` | `/api/videos` | session | List own videos |
-| `GET`/`DELETE` | `/api/videos/[videoId]` | session | Fetch / delete one video |
-| `GET` | `/api/clips?videoId=` | session | Rendered clips + 1 h signed URLs |
-| `GET` | `/api/content` | session | List repurposed content |
-| `PATCH`/`DELETE` | `/api/content/[id]` | session | Edit / delete one asset |
-| `GET` | `/api/analytics` | session | KPIs + 14-day posts series |
-| `GET` | `/api/ai/config` | session | Resolved AI provider status |
+| `GET` | `/api/upload` | session | 🟢 live limit: `maxBytes`, `bucket`, `maxMegabytes`, plus `appMaxBytes` / `storageMaxBytes` |
+| `POST` | `/api/upload` | session | 🟢 multipart; type + size validated; streams to storage, creates the row, triggers the worker. `201` started, `202` stored-but-not-started, `400` malformed, `415` bad type, `413` `MEDIA_TOO_LARGE` |
+| `GET` | `/api/ingest-url` | session | 🟢 `providers: ["youtube"]`, effective size/duration/timeout limits, and the `duplicatePolicy` block (in-flight / completed / failed-cooldown / stale / `force`) |
+| `POST` | `/api/ingest-url` | session | 🟡 YouTube-only ingest with dedupe; `200` deduplicated, `202` started, `400` `YOUTUBE_INVALID_URL`, `504` `DOWNLOAD_TIMEOUT` |
+| `GET` | `/api/videos` | session | 🟢 the user's videos |
+| `DELETE` | `/api/videos` | session | 🟢 bulk delete |
+| `GET` | `/api/videos/[videoId]` | session | 🟢 one video with `status` + `processing_stage` |
+| `DELETE` | `/api/videos/[videoId]` | session | 🟢 delete one video |
+| `GET` | `/api/clips?videoId=` | session | 🟢 ownership-checked, signed expiring clip + thumb URLs |
+| `POST` | `/api/pipeline/process` | `x-service-key` | 🟢 `202` enqueues on the worker; `200` if already processed; `502` if the worker is unreachable |
+| `POST` | `/api/process-video` | `x-service-key` | 🟡 legacy in-app Whisper path, kept as the fallback when `AI_WORKER_URL` is blank |
+| `POST` | `/api/repurpose` | session **or** `x-service-key` | 🟡 writes 5 content types; `503 AI_PROVIDER_NOT_CONFIGURED` when the provider is unusable |
+| `POST` | `/api/content` | session | 🟡 generate + upsert repurposed content; implemented but **no client calls it** — the UI uses `/api/repurpose` instead |
+| `GET` | `/api/content/[id]` | session | 🟢 read one video's content |
+| `PUT` | `/api/content/[id]` | session | 🔴 returns `404` for every row — see limitation 14 |
+| `DELETE` | `/api/content/[id]` | session | 🔴 returns `404` for every row — see limitation 14 |
+| `GET` | `/api/ai/config` | session | 🟢 provider, model, and whether the model was verified against the live catalog |
+| `GET` | `/api/analytics` | session | 🟡 real `totalVideos` / `completedVideos` / `processingVideos` / `postsThisWeek` / 14-day `posts` |
+| `POST` | `/api/auth/signup`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/upsert-profile` | public / session | 🟢 Supabase Auth wrappers |
+| `GET`/`POST`/`PUT` | `/api/subscription`, `/api/subscription/payment-method` | session | 🟠 reads and cancels subscription rows; no active plan can exist without real price IDs |
+| `POST` | `/api/payments/create`, `/api/payments/stripe`, `/api/payments/razorpay`, `/api/payments/verify` | session | 🟠 SDK calls with `price_xxxxx` / `plan_xxxxx` placeholders |
+| `GET` | `/api/payments/provider` | public | 🟠 geo-routing; needs MaxMind credentials |
+| `POST` | `/api/payments/webhook` | signature | 🟠 Stripe `constructEvent` and Razorpay HMAC are implemented, but no real event has ever been delivered |
 
-### Billing
-| Method | Path | Auth | Description |
+There is **no** `GET /api/content` and **no** `PATCH /api/content/[id]` — `/api/content` is POST-only, and `/api/content/[id]` exports GET, PUT, DELETE.
+
+### Worker endpoints
+
+| Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
-| `GET` | `/api/payments/provider` | public | Geo-detected provider for a country/IP |
-| `POST` | `/api/payments/create` | session | Create checkout for a plan |
-| `POST` | `/api/payments/stripe` · `/api/payments/razorpay` | session | Provider-specific create (superseded by `/create`) |
-| `POST` | `/api/payments/verify` | session | Confirm a payment |
-| `POST` | `/api/payments/webhook` | provider signature | Sync subscriptions (both providers) |
-| `GET`/`POST` | `/api/subscription` | session | Read / cancel subscription |
-| `PUT`/`PATCH` | `/api/subscription/payment-method` | session | Set Stripe default payment method |
+| `GET` | `/health` | none | liveness + CUDA + queue snapshot (hidden from the schema) |
+| `GET` | `/status` | none | full config dump + model ids + quantization + queue |
+| `GET` | `/jobs`, `GET /jobs/{id}` | none | recent jobs; large result fields are stripped |
+| `POST` | `/pipeline` | Bearer | enqueue the full pipeline, returns immediately |
+| `POST` | `/transcribe` | Bearer | debug: ASR on a local audio path (threadpool + GPU lease) |
+| `POST` | `/analyze-video` | Bearer | debug: VL on a local video |
+| `POST` | `/find-clips` | Bearer | debug: Mistral clip proposals |
+| `POST` | `/render-clip` | Bearer | debug: render one clip |
+
+`/health`, `/status`, and `/jobs` are unauthenticated because the worker binds `127.0.0.1`. Do not expose it on a public interface. If `AI_WORKER_API_KEY` is empty or literally `changeme`, the protected endpoints **fail closed with a 500** rather than accepting the request.
 
 ---
 
-## 📁 Project structure
+## 🔒 Security
+
+**What is real**
+
+- Supabase Auth with SSR cookie handling; `src/middleware.ts` guards `/dashboard` and 8 `/api` prefixes, returning `401` for API paths and redirecting for pages.
+- RLS on all 10 tables, self-scoped or subquery-scoped; 2 private buckets with first-path-segment ownership checks.
+- The browser never holds the worker URL, the worker bearer token, or the service-role key.
+- `/api/pipeline/process` and `/api/process-video` require `x-service-key`.
+- The worker verifies `videos.user_id` against the requesting user before downloading anything — caller-supplied paths are never trusted.
+- Every API route re-checks the session; `getUserId()` reads only the server-side cookie.
+- YouTube URLs are validated and canonicalised before yt-dlp is invoked, and yt-dlp runs without a shell.
+- The worker sanitizes error messages and structured extras, redacting JWTs, key-shaped strings, bearer tokens, and `*_KEY`/`*_SECRET`/`*_TOKEN`/`*_PASSWORD` assignments.
+- Stripe webhook signature verification via `stripe.webhooks.constructEvent`; Razorpay via HMAC-SHA256 comparison.
+- Input validation on upload (MIME + extension + size), on repurpose (`videoId`, ownership), and on payments (plan key must exist in the plan map).
+- `.env*` is git-ignored except `.env.example`.
+
+**What is incomplete or unverified**
+
+- **Not production-grade security.** There is no CI, no dependency scanning, no rate limiting, no CAPTCHA, and no abuse protection on ingest or repurpose.
+- `x-user-id` in `lib/auth-utils.ts` is dead code and should be removed so nobody relies on it.
+- `/api/ingest-url` shells out to yt-dlp with `INGEST_MAX_BYTES` and `INGEST_MAX_DURATION_SECONDS` as the only resource bound. A hostile URL can still make the server download up to 50 MiB and hold the request for 240 s. Single-flight locking limits concurrency to one per user, not globally.
+- `payments`, `usage_logs`, and `api_keys` are deny-all under RLS, so every read goes through the service-role key. Any bug in a route's `getUserId()` becomes a cross-tenant read.
+- No policy declares a `TO` role, so every policy applies to `PUBLIC`. Today the `auth.uid()` predicates make that harmless, but it is a fragile default.
+- Webhook handling is unverified against real provider traffic, and the handler treats an unrecognised or unsigned body as a success (`{received: true}`) rather than a rejection.
+- The E2E test password is committed as a default in three spec files. Acceptable only for the throwaway `krix.e2e@example.com` account.
+- `ai-worker/.env` and `.env.local` hold live keys on this machine. Both are git-ignored; keep it that way, and rotate if they ever land in history.
+
+---
+
+## 🧪 Testing
+
+### Results recorded in this repository
+
+| Check | Command | Result |
+| --- | --- | --- |
+| TypeScript | `npx tsc --noEmit` | 🟢 exit 0 (re-run 2026-09-30) |
+| Lint | `npm run lint` | 🟢 `✔ No ESLint warnings or errors` (re-run 2026-09-30) |
+| Python unit + API | `pytest -p no:warnings` | 🟢 **216 passed, 28 skipped, 51.62 s** (re-run 2026-09-30) |
+| Python compile | `python -m compileall -q app` | 🟢 clean, exit 0 |
+| Mistral JSON regression | `pytest -q tests/test_mistral_json.py` | 🟢 12 passed |
+| Worker health | `GET /health` | 🟢 `ok`, CUDA true, queue idle, 0 pending |
+| Real full pipeline | `RUN_REAL_E2E=1 pytest tests/integration/test_real_e2e_gpu.py` | 🟢 9/9 tests, 188.97 s, 2 × 1080×1920 clips from real media |
+| Real long video | `RUN_REAL_LONG=1` (1/10/30/60 min) | 🟢 5/5, 509.98 s combined; real chunking, stitching, offsets |
+| Real ASR | `RUN_REAL_ASR=1` | 🟢 4,704 aligned words on 60-minute audio |
+| Local upload | Playwright TEST 1 | 🟢 10.84 MB MP4 in a real browser |
+| YouTube ingest | Playwright TEST 2 | 🟡 route exercised; downloads blocked on this network |
+| Env facts | Playwright TEST 3 | 🟢 `maxBytes = 52428800` confirmed live |
+| Repeated ingest | Playwright TEST 4 | 🟢 4 posts → 1 row, same `videoId`, 729–770 ms |
+| Auto-repurpose | Playwright TEST 5 | 🟡 correct `503 AI_PROVIDER_NOT_CONFIGURED`, not a 500 |
+| Database | live Supabase project | 🟢 rows, RLS, and stage values read back directly |
+| Storage | live buckets | 🟢 private buckets, signed URLs |
+| Auth | `login smoke` | 🟢 real Chromium login |
+| Billing | — | ⬜ **NOT TESTED** — placeholder price IDs make a real charge impossible |
+
+There are **222 Python test functions** across 17 files. The default run reports 244 collected cases (parametrized cases expand) — **216 pass, 28 skip**, and the 28 skips are the opt-in GPU/real-media tests gated behind `RUN_REAL_ASR` / `RUN_REAL_VL` / `RUN_REAL_E2E` / `RUN_REAL_LONG`. Six Playwright tests exist across three spec files.
+
+```bash
+# Worker
+cd ai-worker
+.\.venv\Scripts\python -m pytest -q
+.\.venv\Scripts\python -m pytest -q tests/test_mistral_json.py
+$env:RUN_REAL_E2E="1"; .\.venv\Scripts\python -m pytest -q tests/integration/test_real_e2e_gpu.py
+
+# Browser
+npx playwright test e2e/ingestion.spec.ts --project=chromium
+npx playwright test e2e/regression.spec.ts --project=chromium -g "TEST 4"
+```
+
+`playwright.config.ts` runs serially with 1 worker and a 15-minute per-test timeout, and does **not** start the app — start Next.js and the worker yourself first.
+
+---
+
+## ⚠️ Known limitations
+
+Every item below was confirmed in the code or in a test run.
+
+1. **The real upload limit is 50 MiB, not 2 GB.** `UPLOAD_MAX_BYTES` (2 GiB) is only the app ceiling; `effectiveUploadLimit()` takes the **minimum** of it and the bucket's `file_size_limit` (unset in SQL ⇒ 50 MiB on the current plan). TEST 3 asserts `52428800`. Any "2 GB uploads" claim is false today.
+2. **YouTube availability is network- and IP-dependent.** Two first-time imports of new URLs here ended in `504 DOWNLOAD_TIMEOUT` at ~236 s and ~246 s, and a direct `yt-dlp` probe returned `Requested format is not available` — this client is served no usable rendition. `YTDLP_COOKIES_FILE` / `YTDLP_COOKIES_FROM_BROWSER` exist for bot-walls but were not sufficient. Repeat imports of an already-imported URL are unaffected.
+3. **Auto-repurpose is blocked by provider credit, not by code.** The key is valid (verified with a live completion returning `OK`) and the model is in OpenRouter's live catalog, but the account can fund only 2,601 of the 4,000 tokens a run requests. The app now returns `503 AI_PROVIDER_NOT_CONFIGURED` with an actionable message and stores nothing; `repurposed_content` is still empty. Operator action only.
+4. **Google OAuth is almost certainly broken.** `src/app/auth/callback/page.tsx` passes `window.location.search.slice(1)` — the string `code=…&state=…` — to `exchangeCodeForSession`, which expects the bare code, and adds a 200 ms race on top. Email/password auth is unaffected.
+5. **No real content has been generated by the repurpose path in this environment** (see 3), so the end-to-end quality of the 5 content types is unverified.
+6. **Center crop, not Smart Reframe.** The filter chain is `scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920` with no offsets, so the subject is cropped out whenever it is off-centre. No tracking, no face detection.
+7. **Visual analysis only sees the first ~2 minutes of a long video.** Frames are sampled every 10 s up to 12, greedily from the start, so a 60-minute video contributes 12 frames from its opening 120 s.
+8. **Billing cannot complete.** `STRIPE_PLANS` and `RAZORPAY_PLANS` use `price_xxxxx` / `plan_xxxxx`, so checkout fails at the provider. The marketing page's four tiers link straight to `/auth/signup` and never call checkout.
+9. **The pricing page claims things that do not exist:** "Unlimited videos", "Watermarked exports" (no watermarking is ever applied), "No watermark" (nothing to remove), "AI custom branding", "Advanced analytics", "Custom AI training", "API access", "24/7 phone support".
+10. **The capabilities grid advertises unimplemented features:** "AI Producer", "ClipAnything", "AI B-Roll", "AI Reframe", "Editor", "Animated captions" (static ASS only), "Social scheduler", "Export to XML", "Thumbnail generator" (a plain extracted frame), "Brand template", "Team workspace", "API", "MCP", "Inspiration gallery".
+11. **`/dashboard/api` documents a fictional API** — `POST /v1/clips`, `POST /v1/clips/{id}/edit`, `POST /v1/clips/{id}/publish`, `GET /v1/usage` — and shows a sample `kx_live_…` key. None of it exists.
+12. **Analytics mixes real and fake numbers.** `totalVideos`, `completedVideos`, `processingVideos`, and `postsThisWeek` are real. "YouTube 48.2K", "TikTok 31.9K", "Instagram 18.4K", "X 12.1K", "Total views 112.6K", "Avg. watch rate 41%", the deltas, and the "top 10%" bar are hardcoded in `src/app/dashboard/analytics/page.tsx:17-20,61-64`. No platform data is ever fetched — Krix publishes nothing and has no platform integrations.
+13. **Team, Projects, Calendar, and Inspiration are static mockups.** Hardcoded members (`priya@krix.app`, `alex@krix.app`, `jamie@krix.app`), hardcoded project names, a hardcoded calendar whose "Schedule a post" writes nothing, and static idea cards. No tables, no API routes.
+14. **`PUT` and `DELETE /api/content/[id]` return 404 for every real row.** They embed `videos!inner(user_id)` and read it as an array — `(existing.videos as {user_id}[])[0].user_id`. `repurposed_content.video_id → videos.id` is many-to-one, so PostgREST returns a single **object**: `.length` is `undefined` (not `0`, so the guard does not trip) and `[0]` is `undefined`, so the comparison is `undefined !== userId` → `"Content not found"` → `404`. Editing and deleting a repurposed item therefore never works. `GET` is unaffected. **The fix is to select `videos!inner(user_id)` and read `existing.videos.user_id` as an object.**
+15. **`NOT_FOUND` maps to HTTP 403** in `errors.py`, and `FileNotFoundError` maps to `NOT_FOUND`, so a missing local file at a non-rendering stage returns 403. `/jobs/{id}` is the only true 404.
+16. **Stage vocabulary can drift.** `video_analysis_jobs.stage` has no CHECK constraint while `videos.processing_stage` does, and `clip_detection.py` raises with `stage="clips"` where `main.py` and `pipeline.py` use `"finding_clips"`.
+17. **Silent transcript truncation is possible.** `asr.py` only warns when alignment returns fewer than half the expected words; there is no hard check that generation stopped short of `max_new_tokens`.
+18. **Mistral prompt truncation drops the head.** `MISTRAL_MAX_INPUT_TOKENS=16384` is enforced with `truncation=True`, which keeps the **tail** — the beginning of the transcript, and in the worst case the system prompt, can be cut.
+19. **`MISTRAL_TEMPERATURE` is never read**; generation is greedy. `AI_WORKER_HOST`/`AI_WORKER_PORT`, `SUPABASE_TIMEOUT`, and the `AI_WORKER_KEEP_ARTIFACTS`/`KEEP_ARTIFACTS` mismatch are also dead config.
+20. **`src/types/index.ts` declares content types that are never written** — `thumbnails` and `hooks`. Only `tweets`, `blog`, `emails`, `linkedin`, `shorts` are produced.
+21. The caption `.ass` file is a temp artifact: it is burned in and then deleted, never uploaded, so the caption text is not retrievable later. `build_srt()` exists and is only used by tests — SRT is not a shipped output.
+22. The worker's `AI_WORKER_WORK_DIR` default is a **relative** `ai-worker/work`, so running uvicorn or pytest from inside `ai-worker/` creates a nested `ai-worker/ai-worker/work`. The scratch path is also relative, not derived from `__file__`.
+23. **No CI.** Nothing runs `tsc`, `lint`, `pytest`, or Playwright on push. There is no Dockerfile, no `vercel.json`, no GitHub Actions, and no migration tooling — schema changes are a manual copy-paste into the SQL Editor.
+24. `test-results/` and `playwright-report/` are now git-ignored, and so is the nested worker scratch dir, but the ~600 MB of media already sitting in `ai-worker/ai-worker/work/` should be deleted from disk.
+
+---
+
+## 📁 Repository layout
 
 ```
 krix/
 ├── src/
 │   ├── app/
-│   │   ├── page.tsx                 # Landing page (11 sections)
-│   │   ├── layout.tsx · globals.css
-│   │   ├── auth/                    # signup, login, OAuth callback
-│   │   ├── pricing/                 # Plans + geo-aware payment selector
-│   │   ├── dashboard/               # 11 routes: center, upload, videos, content/[videoId],
-│   │   │                            #   projects, calendar, analytics, inspiration, api, team, settings
-│   │   └── api/                     # 23 route handlers (auth · upload · pipeline · clips ·
-│   │                                #   repurpose · videos · content · analytics · payments · subscription · ai)
+│   │   ├── page.tsx, layout.tsx, globals.css, pricing/   # marketing site
+│   │   ├── auth/{login,signup,callback}/                # auth pages
+│   │   ├── dashboard/                                   # overview, videos, content/[videoId],
+│   │   │                                                # analytics, settings, upload, team,
+│   │   │                                                # projects, calendar, api, inspiration
+│   │   └── api/                                         # 24 route handlers
 │   ├── components/
-│   │   ├── landing/                 # Hero, CTA, TrustedBy, Capabilities, Solutions, HowItWorks,
-│   │   │                            #   Pricing, Testimonials, FAQ, Footer, Reveal, SpotlightCard,
-│   │   │                            #   BlackHoleBackground, VideoLinkCTA, icons
-│   │   ├── dashboard/               # Sidebar, Navbar, CommandPalette (⌘K), VideoUpload, VideoLibrary,
-│   │   │                            #   RepurposedContent, ContentEditor, DownloadButton, StatusPill,
-│   │   │                            #   PipelineProgress, GeneratedClips, Sparkline, PageHeader, icons
-│   │   ├── auth/                    # SignupForm, LoginForm, GoogleSignIn, ProtectedRoute
-│   │   ├── supabase/payment/        # PaymentSelector, StripeCheckout, RazorpayCheckout
-│   │   ├── supabase/                # schema.sql, ai_pipeline.sql
-│   │   └── ui/                      # Button, Card, Input, Textarea, Modal, Toast, Skeleton, Loading, ComingSoon
-│   ├── lib/                         # supabase, auth-utils, ai-provider, transcribe, worker, stripe,
-│   │                                #   razorpay, geoip, api-client, hooks, utils
-│   ├── types/                       # User, Video, TranscriptSegments, ClipCandidate, GeneratedClip,
-│   │                                #   RepurposedContent, Subscription, Payment, Plan
-│   └── middleware.ts                # Route guard + service-key bypass
-├── ai-worker/                       # Python/FastAPI video pipeline — see ai-worker/README.md
+│   │   ├── landing/       # 16 marketing components
+│   │   ├── dashboard/     # 14 dashboard components
+│   │   ├── auth/, ui/     # forms, guards, 9 UI primitives
+│   │   └── supabase/      # schema.sql, ai_pipeline.sql, payment/
+│   ├── lib/               # 14 modules: supabase, auth-utils, api-client, worker,
+│   │                      # ai-provider, stripe, razorpay, geoip, transcribe,
+│   │                      # hooks, utils, ingest, ingest-dedupe, ytdlp
+│   ├── types/
+│   └── middleware.ts      # route guard
+├── ai-worker/
 │   ├── app/
-│   │   ├── main.py                  # FastAPI app + 7 endpoints + error handler
-│   │   ├── config.py                # 50+ env-driven settings, PipelineError, Segment
-│   │   ├── pipeline.py              # Orchestrator (6 stages)
-│   │   ├── models/                  # manager.py (ModelManager), asr.py, vision.py, mistral.py
-│   │   ├── services/                # audio, transcription, video_analysis, clip_detection,
-│   │   │                            #   captions, rendering, storage
-│   │   └── schemas/pipeline.py      # Pydantic request/response models
-│   └── tests/                       # 78 pytest tests
-├── AI_IMPLEMENTATION_PLAN.md        # Original audit + architecture plan
-├── AI_PIPELINE_STATUS.md            # On-machine verification report (2026-09-22)
-└── DEVELOPMENT.md
+│   │   ├── main.py        # FastAPI app, 9 routes, GPU queue startup
+│   │   ├── config.py      # 61 env vars
+│   │   ├── errors.py      # PipelineError + HTTP mapping + message sanitizer
+│   │   ├── pipeline.py    # the 6 stages
+│   │   ├── models/        # asr, vision, mistral, manager
+│   │   ├── services/      # audio, transcription, video_analysis, clip_detection,
+│   │   │                  # captions, rendering, storage, job_queue,
+│   │   │                  # repurpose_callback
+│   │   └── schemas/
+│   ├── tests/             # 17 test files, 222 test functions
+│   ├── scripts/           # check-supabase.mjs (read-only live probe)
+│   └── requirements.txt
+├── e2e/                   # smoke, ingestion, regression Playwright specs
+├── public/
+├── playwright.config.ts
+├── package.json, tailwind.config.ts, next.config.mjs, tsconfig.json
+├── .env.example
+└── *.md                   # this file + the reports below
 ```
+
+Generated and not in version control: `node_modules/`, `.next/`, `ai-worker/.venv/`, `ai-worker/work*/`, `test-results/`, `*.log`.
 
 ---
 
-## 🧪 Tests & verification
+## 🗺️ Roadmap
 
-```bash
-npx tsc --noEmit          # ✅ clean
-npm run lint              # ✅ No ESLint warnings or errors
-cd ai-worker && .\.venv\Scripts\python -m pytest -q
-```
+Derived from what the code and the reports actually identify. Nothing here is built.
 
-**78 tests** (77 passed here, 1 skipped — the real-GPU ASR test runs when CUDA is present and was previously verified on this machine):
+### P0 — before any launch
 
-| File | Covers |
+1. Fix the four confirmed defects: the Google OAuth callback (4), the `content/[id]` embed shape (14), the `NOT_FOUND` → 403 mapping (15), and the stage-vocabulary drift (16).
+2. Get content actually generated: fund or replace the LLM provider so `/api/repurpose` runs end-to-end (3), then verify the 5 content types against real transcripts (5).
+3. Replace every false marketing claim: pricing features (9), the capabilities grid (10), the fictional API page (11), and the hardcoded analytics numbers (12). Until this is done the site advertises products that do not exist.
+4. Add rate limiting and abuse protection to `/api/ingest-url`, `/api/repurpose`, and `/api/upload`.
+5. Add CI (`tsc`, `lint`, `pytest`) — today nothing runs on push.
+6. Make the schema reproducible: versioned migrations instead of a manual SQL-Editor paste.
+7. Remove the dead `x-user-id` branch from `lib/auth-utils.ts`.
+8. Confirm billing with real price IDs, or hide the pricing page until it works.
+9. Delete the ~600 MB of stray media in `ai-worker/ai-worker/work/` and make `AI_WORKER_WORK_DIR` absolute.
+
+### P1 — core product completion
+
+1. Frame sampling across the whole video instead of the first 120 s.
+2. Add a real transcript-truncation guard and a head-preserving prompt budget.
+3. Replace center crop with subject tracking, so clips actually keep the speaker.
+4. Persist the caption file and add SRT/VTT sidecars plus caption style variants.
+5. Add a real clip-quality evaluation set so scoring changes are measurable.
+6. Raise the effective upload limit: set `file_size_limit` on the buckets, or add a chunked/resumable upload path so `UPLOAD_MAX_BYTES` means something.
+7. Make YouTube ingestion more reliable: better format fallbacks, cookies configured by default, clearer per-attempt diagnostics.
+8. Make analytics real or remove it — no hardcoded platform numbers.
+
+### P2 — growth
+
+1. Social publishing with platform OAuth, and real scheduling with a queue.
+2. Real thumbnails via a model, not an extracted frame.
+3. Brand templates and caption kits.
+4. Populate Projects, Team, and Calendar with real tables and APIs.
+
+### P3 — platform
+
+1. The public REST API that `/dashboard/api` already advertises.
+2. MCP server.
+3. Team seats, roles, and permissions.
+4. LoRA/QLoRA fine-tuning of the clip ranker.
+5. A timeline editor and Premiere/DaVinci interchange.
+
+---
+
+## 🧬 Long-term AI direction
+
+Future goals. **None of this has been started**, and no model in this repository has been fine-tuned.
+
+- **Better clip ranking.** The 6-dimension Mistral score is a first pass. The next step is a learned ranker trained on real performance feedback.
+- **Dataset collection and human labelling.** Export candidate clips with their scores, have a human mark the good ones, and use that as training data.
+- **Krix ClipRank** — a fine-tuned ranker over transcript + visual features, replacing or reranking Mistral's judgement.
+- **Krix ContentWriter** — a model specialised for repurposing copy, trained on the same labelled corpus.
+- **LoRA / QLoRA** on the open-weight stack, so the ranker fits the 8 GB card alongside the other models.
+- **Published checkpoints on Hugging Face**, with the evaluation set published alongside them.
+- **Visual embeddings** — index frames so clip selection can search visually, not just sample 12 times.
+- **Personalized scoring** — weight the six dimensions per account based on what that creator actually posts.
+
+---
+
+## 🧑‍💻 Development workflow
+
+1. Start the worker first: `cd ai-worker` → `.\.venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8741`.
+2. Check `GET /health` — `status: ok`, `cuda_available: true`, `pending: 0`.
+3. Start the app: `npm run dev`.
+4. Apply both SQL files to Supabase if you changed the schema, then `node ai-worker/scripts/check-supabase.mjs`.
+5. Before committing: `npx tsc --noEmit` and `npm run lint`.
+6. Worker tests: `cd ai-worker` → `.\.venv\Scripts\python -m pytest -q`.
+7. Real media when a change touches the pipeline: `$env:RUN_REAL_E2E="1"` → the real GPU suite. Do not skip this — most pipeline bugs found in this repo only appeared on real video.
+8. Browser: `npx playwright test e2e/ingestion.spec.ts --project=chromium` with both processes running.
+9. Verify DB changes by reading rows back with the service-role client, not by trusting the write call.
+
+**Rules that matter here**
+
+- Never expose the worker to the browser, and never put `AI_WORKER_API_KEY`, `INTERNAL_SERVICE_KEY`, or `SUPABASE_SERVICE_ROLE_KEY` in a `NEXT_PUBLIC_` variable or a component.
+- Never bypass Supabase authorization to make something work. If RLS blocks you, the query is wrong.
+- Never commit a `.env` file. `.env*` is ignored except `.env.example`.
+- Preserve the one-model-at-a-time `ModelManager` strategy. Loading two models at once is what makes the 8 GB budget fail.
+- Test with real media. Synthetic fixtures hide transcription, alignment, and rendering bugs.
+- Do not mark a scaffolded feature as working. If it has not been run, it is 🟠 or ⚪.
+- Update this README, and the status table at the top, when functionality changes.
+- Commit the docs and the code that the docs describe together. A README that describes a commit you are not pushing is worse than no README.
+
+---
+
+## Further reading
+
+| Document | What it is |
 | --- | --- |
-| `test_api_auth.py` | Bearer auth: missing/valid/invalid token, `changeme` fail-closed, error-code registry |
-| `test_asr_segments.py` | Word→segment merging, 0.35 s gap threshold, flat-segment fallback |
-| `test_captions.py` | ASS/SRT time formats, RGB→BGR colour conversion, wrapping, `{}` neutralisation |
-| `test_clip_validation.py` | Bounds, min/max duration, min score, overlap dedupe, `max_clips` clamp, chronological re-sort |
-| `test_commands.py` | FFmpeg/ffprobe argv construction, Windows path escaping in `subtitles=` filters |
-| `test_storage_errors.py` | Ownership enforcement (`NOT_FOUND` on wrong owner), `PipelineError` round-trip, all 16 error codes documented |
-| `integration/test_real_ffmpeg.py` | Real ffmpeg: probe, audio extraction, frame sampling, 9:16 render, caption burn-in pixel diff |
-| `integration/test_real_asr_gpu.py` | Real `Qwen3-ASR-1.7B` CUDA transcription |
-
-**Manual E2E result** (39.9 s test video built from real MLK speech samples + 6 slides, on an RTX 4060 Laptop 8 GB):
-
-| Step | Result |
-| --- | --- |
-| ffprobe | ✅ duration 39.911 s, 1280×720, 24 fps, audio + video |
-| Audio → 16 kHz WAV | ✅ 1.28 MB |
-| Frame sampling | ✅ 4 frames at 0/10/20/30 s |
-| **Qwen3-ASR on CUDA** | ✅ 21.7 s model load, ~5 s transcribe, `language=English`, correct opening line |
-| ASS caption build | ✅ real `Dialogue:` events |
-| **9:16 render + burn** | ✅ 1080×1920@30 H.264, 17 s; burn confirmed by pixel diff (mean 3.9 in the caption band) |
-| `validate_and_rank` | ✅ correctly dropped sub-20 s candidates |
-| FastAPI auth | ✅ `/health` 200 (`cuda_available: true`), bad key 401, good key 200 |
+| [`INGESTION_RECOVERY_REPORT.md`](INGESTION_RECOVERY_REPORT.md) | Newest evidence (2026-09-30). Duplicate-ingestion PASS, auto-repurpose BLOCKED on provider credit, with real browser transcripts. |
+| [`CORE_PIPELINE_COMPLETION.md`](CORE_PIPELINE_COMPLETION.md) | The AI pipeline's verification record: 9/9 real pipeline tests, 188.97 s, 14 bugs found and fixed, 60-minute video results. |
+| [`AI_PIPELINE_STATUS.md`](AI_PIPELINE_STATUS.md) | Short per-component scorecard. Superseded in part by the two reports above. |
+| [`ai-worker/README.md`](ai-worker/README.md) | Worker setup, endpoint reference, and layout. |
+| [`AI_IMPLEMENTATION_PLAN.md`](AI_IMPLEMENTATION_PLAN.md) | The original audit and build plan. Historical. |
+| `DEVELOPMENT.md` | **Stale.** Still describes YouTube import as a no-op and transcription as OpenAI Whisper. Kept for history only — do not follow it. |
 
 ---
 
-## ⚠️ Known limitations (honest status)
+## License
 
-**Blocking the full pipeline today**
-
-1. **`ai_pipeline.sql` has not been applied** to the Supabase project. Without it, `videos.processing_stage` is a `42703 does not exist` error, `clip_candidates` / `generated_clips` / `video_analysis_jobs` return `404`, and the `generated_clips` bucket is missing — so the worker's persistence stages and `GET /api/clips` cannot work. Run the file; the service-role key cannot execute DDL.
-2. **Two large models were never downloaded** — `Qwen/Qwen3-VL-4B-Instruct` (~8.9 GB) and `mistralai/Mistral-7B-Instruct-v0.3` (~14.5 GB) — so `analyzing` and `finding_clips` are coded and wired but have not been executed. The forced aligner (~1.2 GB) is also incomplete, so word timestamps currently fall back to flat segments.
-3. **The worker never triggers `/api/repurpose`.** The worker's `/pipeline` returns immediately, so Next.js has no completion hook. With the worker configured, clips are produced but `repurposed_content` is not auto-generated — call `POST /api/repurpose` (service key) once the video is `completed`, or add a worker→app callback. On the legacy path this happens automatically.
-
-**Scaffolded, not functional**
-
-4. **Payments cannot complete** — all 6 plan IDs are `price_xxxxx` / `plan_xxxxx`. Create real products and paste the IDs into `src/lib/stripe.ts` and `src/lib/razorpay.ts`.
-5. **5 dashboard pages are static mockups** — `calendar`, `projects`, `team`, `api`, `inspiration` render hardcoded data and import neither `supabase` nor `apiClient`.
-6. **No remote-URL ingest.** The Hero/VideoLinkCTA "paste a link" inputs have no server route; only file upload is implemented.
-7. **No API-key issuance.** The `api_keys` table exists with RLS but no route creates or validates keys, so the "API & MCP" page is documentation only.
-8. **Stripe `/verify` performs no signature check** — it marks a subscription `active` from the request body. Only the webhook path is signature-verified. Do not rely on `/verify` for security.
-9. **Landing pricing is static** — the cards are hardcoded and not read from `STRIPE_PLANS`.
-
-**Correctness & performance notes**
-
-10. `apiClient.login()` targets `/api/auth/login`, which uses a cookie-less anon client and cannot set cookies. Login works because `LoginForm` calls Supabase directly — but don't rely on the route.
-11. The `x-user-id` header fallback in `getUserId()` is a dead branch that always returns `null`, which makes the matching axios interceptor a no-op. Server-to-server identity comes from `x-service-key` only.
-12. `ASR_MAX_NEW_TOKENS=512` caps generation for the **whole** audio file — long videos will be truncated. Raise it or chunk for production-length content.
-13. Alignment chunks use a ~2.5 words/second heuristic to slice the transcript per chunk, not real text/audio matching. Duplicated or garbled words are possible at chunk boundaries.
-14. `video_analysis` calls `gc.collect()` + `empty_cache()` **after every sampled frame** (the `len(frames) >= 4` guard tests the total count, not the loop index) — a real slowdown on longer videos.
-15. `ModelManager`'s lock guards *loading*, not inference. Two concurrent jobs can evict each other's model. There is no job queue or concurrency limit.
-16. The four debug endpoints are `async def` and run blocking model/ffmpeg work on the event loop, so `/health` is unresponsive while one runs. Only `/pipeline` correctly offloads to a thread.
-17. `render_clip` raises a bare `FileNotFoundError` for a missing output path, which escapes the structured error contract as a raw 500.
-18. `POST /transcribe` returns an unhandled `ValidationError` (not the structured contract) when no word timestamps exist, because the flat fallback segment has `end = 0`.
-19. Unused npm dependencies: `@clerk/nextjs`, `react-hook-form`, `zod`, `@anthropic-ai/sdk`.
-20. Type drift between `src/types/index.ts` and the schema: `Subscription.status` omits `pending` (which both checkout routes insert), `Payment.payment_id` vs the column `external_payment_id`, and `content_type` includes `thumbnails`/`hooks` which are never written.
-21. `cancel_at_period_end: true` is set at the same time as an immediate provider cancel — contradictory. Pick one.
-22. Rendering is **center-crop only**. No smart reframing, subject tracking, B-roll, or caption template variants. `min_duration`/`max_duration`/`max_clips` in `/find-clips` are hardcoded and override the config.
-
-**⬜ Planned, not built**
-
-Social publishing/scheduling, AI producer/editor, B-roll insertion, smart reframe, Premiere/DaVinci XML export, thumbnail generation, brand templates, real team collaboration, the MCP server, and model fine-tuning (the Mistral wrapper notes a future Krix clip-quality dataset + LoRA/QLoRA).
-
----
-
-## 🌐 Deployment
-
-```bash
-npm i -g vercel
-vercel login
-vercel
-```
-
-Set every env var in the Vercel dashboard. Configure webhooks:
-
-```bash
-# Stripe
-stripe listen --forward-to https://yourdomain.com/api/payments/webhook
-
-# Razorpay: Dashboard → Settings → Webhooks
-#   → https://yourdomain.com/api/payments/webhook
-```
-
-The worker is **not** deployed to Vercel — it is a stateful GPU service. Run it on your own machine or a GPU host and set `AI_WORKER_URL` to a reachable address. If you leave `AI_WORKER_URL` blank, uploads fall back to the in-app OpenAI-Whisper + repurpose path, which needs only `OPENAI_API_KEY`.
-
----
-
-## 📚 Further reading
-
-| Document | Contents |
-| --- | --- |
-| [`ai-worker/README.md`](ai-worker/README.md) | Worker setup, endpoint reference, security notes |
-| [`AI_IMPLEMENTATION_PLAN.md`](AI_IMPLEMENTATION_PLAN.md) | Original codebase audit, VRAM strategy, staged build plan |
-| [`AI_PIPELINE_STATUS.md`](AI_PIPELINE_STATUS.md) | On-machine verification report with per-component evidence |
-| [`DEVELOPMENT.md`](DEVELOPMENT.md) | Local development notes |
-
----
-
-© 2026 **Kashinadh Nair** — Krix. All rights reserved.
+Private. No license granted.

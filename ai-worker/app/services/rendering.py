@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app import config as cfg
+from app.config import PipelineError
 from app.services.audio import ffmpeg_binary, run_command
 
 
@@ -97,5 +98,17 @@ def render_clip(
     run_command(cmd, stage="rendering")
     out = Path(output_path)
     if not out.exists():
-        raise FileNotFoundError(f"Render produced no file at {output_path}")
+        # Structured contract — a bare FileNotFoundError would escape as a raw
+        # 500 with no error_code.
+        raise PipelineError(
+            stage="rendering",
+            code="RENDER_FAILED",
+            message=f"Render completed but produced no file at {output_path}",
+        )
+    if out.stat().st_size == 0:
+        raise PipelineError(
+            stage="rendering",
+            code="RENDER_FAILED",
+            message=f"Render produced an empty file at {output_path}",
+        )
     return out

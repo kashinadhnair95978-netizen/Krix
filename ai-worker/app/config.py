@@ -114,10 +114,21 @@ ASR_MODEL = _env("ASR_MODEL", "Qwen/Qwen3-ASR-1.7B-hf")
 ASR_ALIGNER_MODEL = _env("ASR_ALIGNER_MODEL", "Qwen/Qwen3-ForcedAligner-0.6B-hf")
 ASR_DEVICE = _env("ASR_DEVICE", "cuda")  # "cuda" | "cpu"
 ASR_LANGUAGE = _env("ASR_LANGUAGE", "")  # empty = auto-detect
-ASR_MAX_NEW_TOKENS = _env_int("ASR_MAX_NEW_TOKENS", 512)
+# HARD ceiling on generated tokens for a single ASR pass. The per-chunk budget is
+# derived from ASR_CHUNK_SECONDS (see asr.plan_chunks / asr.chunk_token_budget) so
+# a long video is split into chunks instead of being truncated by this number.
+ASR_MAX_NEW_TOKENS = _env_int("ASR_MAX_NEW_TOKENS", 4096)
+# Seconds of audio per ASR pass. Chosen so the derived token budget stays inside
+# the model's comfortable generation length (~1.5k tokens per chunk).
+ASR_CHUNK_SECONDS = _env_float("ASR_CHUNK_SECONDS", 300.0)
+# Overlap between consecutive chunks so words on a boundary are not clipped.
+ASR_CHUNK_OVERLAP_SECONDS = _env_float("ASR_CHUNK_OVERLAP_SECONDS", 2.0)
+# Conservative generation budget per second of audio (speech is ~2.5 words/sec,
+# and 1 word is >=1 token, so this never truncates fluent speech).
+ASR_TOKENS_PER_SECOND = _env_float("ASR_TOKENS_PER_SECOND", 8.0)
 # Set false to skip the forced aligner (timestamps) entirely — transcript only.
 ASR_ENABLE_TIMESTAMPS = _env_bool("ASR_ENABLE_TIMESTAMPS", True)
-# Max seconds per forced-alignment chunk (the aligner is designed for ~5 min).
+# Max seconds of audio handed to the forced aligner in one forward pass.
 ASR_ALIGN_CHUNK_SECONDS = _env_float("ASR_ALIGN_CHUNK_SECONDS", 240.0)
 
 VISION_MODEL = _env("VISION_MODEL", "Qwen/Qwen3-VL-4B-Instruct")
@@ -133,6 +144,10 @@ MISTRAL_DEVICE = _env("MISTRAL_DEVICE", "cuda")
 MISTRAL_QUANTIZATION = _env("MISTRAL_QUANTIZATION", "4bit")
 MISTRAL_MAX_NEW_TOKENS = _env_int("MISTRAL_MAX_NEW_TOKENS", 900)
 MISTRAL_TEMPERATURE = _env_float("MISTRAL_TEMPERATURE", 0.1)
+# Hard cap on the Mistral prompt (transcript + visual observations). Mistral v0.3
+# has a 32k context; staying well under it is what keeps a long-video prompt
+# from OOMing the 8 GB card.
+MISTRAL_MAX_INPUT_TOKENS = _env_int("MISTRAL_MAX_INPUT_TOKENS", 16384)
 # Comma separated list of languages allowed by the aligner (English, Chinese, ...).
 # If empty the aligner uses the ASR-detected language when supported.
 ALIGNER_LANGUAGES = [
@@ -153,6 +168,31 @@ MAX_CLIPS = _env_int("MAX_CLIPS", 3)
 MIN_CLIP_DURATION = _env_float("MIN_CLIP_DURATION", 20.0)
 MAX_CLIP_DURATION = _env_float("MAX_CLIP_DURATION", 90.0)
 MIN_SCORE = _env_float("MIN_SCORE", 0.0)
+
+# ---------------------------------------------------------------------------
+# GPU job queue (single worker: the RTX 4060 has one 8 GB VRAM budget)
+# ---------------------------------------------------------------------------
+# Maximum number of pipeline jobs that may be queued before new submissions are
+# rejected. Keeps /pipeline responsive instead of growing an unbounded backlog.
+GPU_QUEUE_MAX_PENDING = _env_int("GPU_QUEUE_MAX_PENDING", 16)
+# How often the queue worker wakes to report a stuck/slow job in /status.
+GPU_QUEUE_STATUS_LIMIT = _env_int("GPU_QUEUE_STATUS_LIMIT", 25)
+# How long a debug endpoint waits for a free GPU before returning BUSY.
+GPU_LEASE_TIMEOUT = _env_float("GPU_LEASE_TIMEOUT", 3600.0)
+
+
+# ---------------------------------------------------------------------------
+# Automatic text repurposing (worker -> Next.js /api/repurpose)
+# ---------------------------------------------------------------------------
+# Base URL of the Krix Next.js app. The worker calls /api/repurpose over
+# server-to-server HTTP once the clips are stored.
+APP_BASE_URL = _env("KRIX_APP_URL", "http://localhost:3000").rstrip("/")
+# Shared secret sent as `x-service-key`. Server-side only, never exposed to a
+# browser. Leave empty to disable the callback.
+INTERNAL_SERVICE_KEY = _env("INTERNAL_SERVICE_KEY", "")
+# Fire /api/repurpose automatically when the pipeline completes.
+REPURPOSE_ON_COMPLETE = _env_bool("REPURPOSE_ON_COMPLETE", True)
+REPURPOSE_TIMEOUT = _env_float("REPURPOSE_TIMEOUT", 300.0)
 
 # Frame sampling for visual analysis (seconds between candidate frames).
 FRAME_SAMPLE_INTERVAL = _env_float("FRAME_SAMPLE_INTERVAL", 10.0)

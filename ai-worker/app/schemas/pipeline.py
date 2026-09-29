@@ -38,9 +38,11 @@ class FindClipsRequest(BaseModel):
     transcript: list[dict]
     visual: list[dict] = Field(default_factory=list)
     duration: float
-    max_clips: int = 3
-    min_duration: float = 20.0
-    max_duration: float = 90.0
+    # None = use the worker's configured defaults (MAX_CLIPS / MIN_CLIP_DURATION
+    # / MAX_CLIP_DURATION) instead of hardcoding them in the request.
+    max_clips: Optional[int] = None
+    min_duration: Optional[float] = None
+    max_duration: Optional[float] = None
 
 
 class RenderClipRequest(BaseModel):
@@ -159,6 +161,7 @@ ERROR_CODES = {
     "NOT_FOUND": "Resource not found",
     "FORBIDDEN": "Access denied",
     "BAD_REQUEST": "The request was invalid",
+    "BUSY": "The GPU is busy with another job",
     "PIPELINE_INTERNAL": "Unexpected internal pipeline error",
 }
 

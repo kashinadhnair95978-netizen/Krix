@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { apiClient, ingestErrorMessage } from '@/lib/api-client';
 import { browserSupabase } from '@/lib/supabase';
 import { ArrowRight, LinkIcon, Upload } from './icons';
 
@@ -18,6 +19,9 @@ const supportedSources = [
   'StreamYard',
 ];
 
+/** Only what the server actually implements today. */
+const SUPPORTED_PROVIDERS = ['YouTube'];
+
 function normalizeUrl(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return '';
@@ -25,10 +29,12 @@ function normalizeUrl(value: string): string {
   return `https://${trimmed}`;
 }
 
-function isValidUrl(value: string): boolean {
+/** Cheap client-side sanity check; the server re-validates authoritatively. */
+function looksLikeVideoUrl(value: string): boolean {
   try {
     const parsed = new URL(normalizeUrl(value));
-    return ['http:', 'https:'].includes(parsed.protocol);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+    return parsed.hostname.length > 3 && parsed.hostname.includes('.');
   } catch {
     return false;
   }
@@ -38,6 +44,7 @@ export function VideoLinkCTA() {
   const [link, setLink] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const inFlight = useRef(false);
   const router = useRouter();
 
   const go = async (nextPath: string) => {
@@ -54,27 +61,54 @@ export function VideoLinkCTA() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (inFlight.current) return;
     setError('');
 
     if (!link.trim()) {
       setError('Drop a video link to get started.');
       return;
     }
-    if (!isValidUrl(link)) {
-      setError('That doesn\u2019t look like a valid URL yet. Try a YouTube, Vimeo or drive link.');
+    if (!looksLikeVideoUrl(link)) {
+      setError('That doesn\u2019t look like a valid URL yet. Try a YouTube link like https://www.youtube.com/watch?v=…');
       return;
     }
 
+    inFlight.current = true;
     setLoading(true);
+
     try {
+      // Only a signed-in user can import — the endpoint is session-protected.
       const { data } = await browserSupabase.auth.getUser();
-      if (data.user) {
-        await go('/dashboard/upload');
-      } else {
+      if (!data.user) {
         await go('/auth/signup');
+        return;
       }
-    } catch {
-      await go('/auth/signup');
+
+      const res = await apiClient.ingestUrl(normalizeUrl(link));
+      const result = res.data;
+
+      if (result?.videoId) {
+        router.push(`/dashboard/content/${result.videoId}`);
+        return;
+      }
+      // A duplicate answered before the first import wrote a row still has a
+      // deterministic answer: the library will show the job a moment later.
+      if (result?.deduplicated) {
+        router.push('/dashboard/videos');
+        return;
+      }
+      setError('The import finished but no video was returned. Try again.');
+    } catch (err) {
+      // A duplicate import is not a failure — send the user to the live job.
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 200 || status === 201 || status === 202) {
+        router.push('/dashboard/videos');
+        return;
+      }
+      setError(ingestErrorMessage(err, 'Could not import that link.'));
+    } finally {
+      inFlight.current = false;
+      setLoading(false);
     }
   };
 
@@ -86,6 +120,8 @@ export function VideoLinkCTA() {
       router.push('/auth/signup');
     }
   };
+
+  const buttonLabel = loading ? 'Importing video…' : 'Get free clips';
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -99,9 +135,19 @@ export function VideoLinkCTA() {
               setLink(e.target.value);
               setError('');
             }}
+            onPaste={(e) => {
+              // Paste the raw text, not the browser's URL-wrapped version.
+              const text = e.clipboardData.getData('text');
+              if (text && text !== link) {
+                e.preventDefault();
+                setLink(text);
+                setError('');
+              }
+            }}
             placeholder="Drop a video link"
             aria-label="Video link"
-            className="w-full rounded-full border border-white/15 bg-white/[0.06] py-4 pr-5 text-[15px] text-white placeholder-neutral-500 outline-none transition-colors duration-200 focus:border-white/40 focus:bg-white/[0.09] sm:pr-40"
+            disabled={loading}
+            className="w-full rounded-full border border-white/15 bg-white/[0.06] py-4 pr-5 text-[15px] text-white placeholder-neutral-500 outline-none transition-colors duration-200 focus:border-white/40 focus:bg-white/[0.09] disabled:opacity-60 sm:pr-40"
             style={{ paddingLeft: '3.25rem' }}
           />
           <button
@@ -109,7 +155,7 @@ export function VideoLinkCTA() {
             disabled={loading}
             className="absolute right-2 top-1/2 hidden -translate-y-1/2 items-center gap-1.5 rounded-full bg-white px-5 py-2.5 text-sm font-medium text-black transition-all duration-200 hover:bg-neutral-200 disabled:opacity-60 sm:flex"
           >
-            {loading ? 'Jumping in…' : 'Get free clips'}
+            {buttonLabel}
             <ArrowRight className="h-4 w-4" />
           </button>
         </div>
@@ -118,12 +164,23 @@ export function VideoLinkCTA() {
           disabled={loading}
           className="flex w-full items-center justify-center gap-1.5 rounded-full bg-white px-5 py-3 text-sm font-medium text-black transition-all duration-200 hover:bg-neutral-200 disabled:opacity-60 sm:hidden"
         >
-          {loading ? 'Jumping in…' : 'Get free clips'}
+          {buttonLabel}
           <ArrowRight className="h-4 w-4" />
         </button>
       </form>
 
-      {error && <p className="mt-3 text-center text-sm text-red-300">{error}</p>}
+      {error && (
+        <p role="alert" className="mt-3 text-center text-sm text-red-300">
+          {error}
+        </p>
+      )}
+
+      {loading && (
+        <p className="mt-3 text-center text-sm text-neutral-400">
+          Downloading the video on the server and starting the AI pipeline. This
+          can take a minute for a longer video — keep this tab open.
+        </p>
+      )}
 
       <div className="mt-6 flex items-center justify-center gap-6 text-sm text-neutral-400">
         <span className="hidden h-px w-16 bg-white/10 sm:block" />
@@ -138,8 +195,9 @@ export function VideoLinkCTA() {
       </div>
 
       <p className="mt-7 text-center text-xs text-neutral-600">
-        We support videos from: {supportedSources.join(', ')} and more. Currently
-        English, Spanish, French, German and 20+ other languages.
+        Link import is live for <span className="text-neutral-400">{SUPPORTED_PROVIDERS.join(', ')}</span>{' '}
+        today. {supportedSources.length - SUPPORTED_PROVIDERS.length > 0 && `We list ${supportedSources.join(', ')} as coming sources.`}{' '}
+        Currently English, Spanish, French, German and 20+ other languages.
       </p>
     </div>
   );

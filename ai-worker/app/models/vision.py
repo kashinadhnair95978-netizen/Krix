@@ -110,8 +110,22 @@ def _extract_json(text: str) -> dict:
         ) from exc
 
 
+def _clamp(value, low: float, high: float, default: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number != number:  # NaN
+        return default
+    return max(low, min(high, number))
+
+
 def describe_frame(timestamp: float, image) -> dict:
-    """Describe one PIL image, returning an event dict with the given timestamp."""
+    """Describe one PIL image, returning an observation dict for that timestamp.
+
+    Retries once on a JSON parse failure (a small 4B model occasionally wraps
+    its answer in prose). Retrying is far cheaper than failing the stage.
+    """
     import torch
 
     bundle = load_vision()
@@ -126,40 +140,61 @@ def describe_frame(timestamp: float, image) -> dict:
             ],
         }
     ]
-    try:
-        inputs = processor.apply_chat_template(
-            messages,
-            add_generation_prompt=True,
-            tokenize=True,
-            return_dict=True,
-            return_tensors="pt",
-        ).to(model.device)
-        with torch.inference_mode():
-            outputs = model.generate(**inputs, max_new_tokens=cfg.VISION_MAX_NEW_TOKENS)
-        generated = outputs[0][inputs["input_ids"].shape[1]:]
-        text = processor.decode(generated, skip_special_tokens=True)
-    except torch.cuda.OutOfMemoryError as exc:
-        raise PipelineError(
-            stage="analyzing",
-            code="MODEL_OUT_OF_MEMORY",
-            message=f"Out of memory during visual analysis: {exc}",
-        ) from exc
-    except Exception as exc:
-        raise PipelineError(
-            stage="analyzing",
-            code="VISION_FAILED",
-            message=f"Visual analysis failed: {exc}",
-        ) from exc
 
-    data = _extract_json(text)
-    return {
-        "timestamp": round(float(timestamp), 3),
-        "description": data.get("description", "") or "",
-        "speaker_count": int(data.get("speaker_count", 0) or 0),
-        "speaker_position": data.get("speaker_position"),
-        "scene_type": data.get("scene_type"),
-        "visual_interest": float(data.get("visual_interest", 0.0) or 0.0),
-    }
+    last_error: PipelineError | None = None
+    for attempt in range(2):
+        try:
+            inputs = processor.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_dict=True,
+                return_tensors="pt",
+            ).to(model.device)
+            with torch.inference_mode():
+                outputs = model.generate(**inputs, max_new_tokens=cfg.VISION_MAX_NEW_TOKENS)
+            generated = outputs[0][inputs["input_ids"].shape[1]:]
+            text = processor.decode(generated, skip_special_tokens=True)
+        except torch.cuda.OutOfMemoryError as exc:
+            raise PipelineError(
+                stage="analyzing",
+                code="MODEL_OUT_OF_MEMORY",
+                message=f"Out of memory during visual analysis: {exc}",
+            ) from exc
+        except PipelineError as exc:
+            last_error = exc
+            continue
+        except Exception as exc:
+            raise PipelineError(
+                stage="analyzing",
+                code="VISION_FAILED",
+                message=f"Visual analysis failed: {exc}",
+            ) from exc
+
+        try:
+            data = _extract_json(text)
+        except PipelineError as exc:
+            last_error = exc
+            continue
+
+        description = str(data.get("description", "") or "").strip()
+        # "observation" is the documented field name for the visual observation;
+        # it mirrors "description" so both shapes are valid.
+        return {
+            "timestamp": round(float(timestamp), 3),
+            "observation": description,
+            "description": description,
+            "speaker_count": int(_clamp(data.get("speaker_count"), 0, 50, 0)),
+            "speaker_position": data.get("speaker_position"),
+            "scene_type": data.get("scene_type"),
+            "visual_interest": round(_clamp(data.get("visual_interest"), 0.0, 1.0, 0.0), 3),
+        }
+
+    raise last_error or PipelineError(
+        stage="analyzing",
+        code="VISION_FAILED",
+        message="Visual analysis failed after retry",
+    )
 
 
 def unload() -> None:

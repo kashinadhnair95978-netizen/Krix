@@ -2,7 +2,13 @@
 
 import pytest
 
-from app.services.clip_detection import _overlaps_any, json_lines, validate_and_rank
+from app.services import clip_detection
+from app.services.clip_detection import (
+    _overlaps_any,
+    build_prompt,
+    json_lines,
+    validate_and_rank,
+)
 from app.schemas.pipeline import ClipCandidate
 
 
@@ -161,3 +167,126 @@ def test_garbage_clip_dicts_are_dropped_not_crash():
         min_score=0,
     )
     assert len(result) == 1
+# ---------------------------------------------------------------------------
+# Prompt bounds: a 60s video must never be told "clips up to 90s"
+# ---------------------------------------------------------------------------
+
+
+def test_prompt_clamps_max_clip_length_to_the_video_duration():
+    system, _ = build_prompt([], [], 60.0)
+    assert "at most 60 seconds" in system
+    assert "at most 90 seconds" not in system
+    assert "end <= 60.0" in system
+    assert "at least 20 seconds" in system
+
+
+def test_prompt_keeps_configured_maximum_for_long_videos():
+    system, _ = build_prompt([], [], 3600.0)
+    assert "at most 90 seconds" in system
+    assert "end <= 3600.0" in system
+
+
+def test_prompt_contains_no_unrendered_placeholder():
+    system, user = build_prompt(
+        [{"start": 0.0, "end": 5.0, "text": "hello"}],
+        [{"timestamp": 1.0, "description": "a face"}],
+        300.0,
+    )
+    for text in (system, user):
+        assert "{" not in text.split("Rule:")[-1] or "{{" not in text
+        assert "{min_dur}" not in text
+        assert "{max_clips}" not in text
+        assert "{duration" not in text
+    assert "hello" in user and "a face" in user
+
+
+# ---------------------------------------------------------------------------
+# One bounded corrective retry
+# ---------------------------------------------------------------------------
+
+
+class _FakeMistral:
+    """Stands in for the model; records every prompt it was given."""
+
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def generate_json(self, system, user):
+        self.calls.append((system, user))
+        return self.responses[min(len(self.calls) - 1, len(self.responses) - 1)]
+
+
+def test_valid_first_answer_is_not_retried(monkeypatch):
+    fake = _FakeMistral([{"clips": [_raw(0, 40, score=95)]}])
+    monkeypatch.setattr(clip_detection.mistral, "generate_json", fake.generate_json)
+    result = clip_detection.find_clip_candidates([], [], 300.0)
+    assert len(result) == 1
+    assert len(fake.calls) == 1, "a good answer must cost exactly one model call"
+
+
+def test_short_clips_trigger_exactly_one_retry(monkeypatch):
+    # First answer is the real failure seen on a 60s video: a 4.7s clip.
+    fake = _FakeMistral(
+        [
+            {"clips": [_raw(0.0, 4.7, score=90)]},
+            {"clips": [_raw(0.0, 55.0, score=88)]},
+        ]
+    )
+    monkeypatch.setattr(clip_detection.mistral, "generate_json", fake.generate_json)
+    result = clip_detection.find_clip_candidates([], [], 60.0)
+    assert len(result) == 1
+    assert result[0]["end"] - result[0]["start"] >= 20.0
+    assert len(fake.calls) == 2
+    # The retry must be told what was wrong.
+    assert "4.7s" in fake.calls[1][1]
+    assert "rejected" in fake.calls[1][1]
+
+
+def test_retry_is_bounded_to_one_extra_call(monkeypatch):
+    fake = _FakeMistral([{"clips": [_raw(0.0, 4.7, score=90)]}])
+    monkeypatch.setattr(clip_detection.mistral, "generate_json", fake.generate_json)
+    assert clip_detection.find_clip_candidates([], [], 60.0) == []
+    assert len(fake.calls) == 2, "must not loop forever on a hopeless answer"
+
+
+def test_retry_on_past_the_end_clip(monkeypatch):
+    fake = _FakeMistral(
+        [
+            {"clips": [_raw(0.0, 400.0, score=99)]},
+            {"clips": [_raw(10.0, 50.0, score=80)]},
+        ]
+    )
+    monkeypatch.setattr(clip_detection.mistral, "generate_json", fake.generate_json)
+    result = clip_detection.find_clip_candidates([], [], 60.0)
+    assert len(result) == 1
+    assert "past the 60.0s end" in fake.calls[1][1]
+
+
+def test_empty_model_list_is_retried(monkeypatch):
+    fake = _FakeMistral([{"clips": []}, {"clips": [_raw(5.0, 45.0, score=70)]}])
+    monkeypatch.setattr(clip_detection.mistral, "generate_json", fake.generate_json)
+    result = clip_detection.find_clip_candidates([], [], 300.0)
+    assert len(result) == 1
+    assert "empty" in fake.calls[1][1]
+
+
+def test_unparseable_payload_is_retried(monkeypatch):
+    fake = _FakeMistral(["I cannot help with that", {"clips": [_raw(5.0, 45.0, score=70)]}])
+    monkeypatch.setattr(clip_detection.mistral, "generate_json", fake.generate_json)
+    assert len(clip_detection.find_clip_candidates([], [], 300.0)) == 1
+    assert len(fake.calls) == 2
+
+
+def test_describe_violations_names_the_minimum():
+    problems = clip_detection._describe_violations(
+        [_raw(0.0, 4.7, score=90)],
+        duration=60.0,
+        max_clips=3,
+        min_duration=20.0,
+        max_duration=90.0,
+        min_score=0.0,
+    )
+    assert "4.7s" in problems
+    assert "20s minimum" in problems
+    assert "60s long" in problems

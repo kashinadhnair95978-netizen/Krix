@@ -64,6 +64,81 @@ def wrap_text(text: str, max_chars: int = 32) -> str:
     return "\x85".join(lines)
 
 
+def words_to_cues(
+    words: list[dict],
+    *,
+    max_chars: int | None = None,
+    max_words: int = 6,
+    max_duration: float = 4.0,
+    pause_break: float = 0.6,
+    min_duration: float = 0.3,
+) -> list[dict]:
+    """Group timed words into readable short-form caption cues.
+
+    ASR segments are far too coarse for burn-in captions: a 4.6s "segment" can
+    carry an entire paragraph, which renders as an unreadable wall of text. Real
+    short-form captions are built from word timings, so this groups words until
+    one of these natural breaks is reached:
+
+    * ``max_words`` words, or ``max_chars`` characters of text
+    * a pause longer than ``pause_break`` seconds (a breath or sentence gap)
+    * sentence-ending punctuation
+    * ``max_duration`` seconds of screen time
+
+    Pure function, so the grouping is unit tested without ffmpeg.
+    """
+    max_chars = max_chars or cfg.CAPTION_MAX_CHARS
+    cues: list[dict] = []
+    group: list[dict] = []
+
+    def flush() -> None:
+        if not group:
+            return
+        text = " ".join(str(w.get("text", "")).strip() for w in group).strip()
+        if text:
+            start = float(group[0]["start"])
+            end = float(group[-1]["end"])
+            cues.append(
+                {
+                    "start": start,
+                    "end": min(max(end, start + min_duration), start + max_duration),
+                    "text": wrap_text(text, max_chars),
+                }
+            )
+        group.clear()
+
+    for word in words:
+        text = str(word.get("text", "")).strip()
+        if not text:
+            continue
+        try:
+            start = float(word.get("start", 0.0) or 0.0)
+            end = float(word.get("end", start) or start)
+        except (TypeError, ValueError):
+            continue
+        if end <= start:
+            end = start + min_duration
+
+        if group:
+            previous = group[-1]
+            gap = start - float(previous["end"])
+            pending_text = " ".join(
+                [str(w.get("text", "")).strip() for w in group] + [text]
+            )
+            too_many_words = len(group) + 1 > max_words
+            too_wide = len(pending_text) > max_chars
+            long_pause = gap > pause_break
+            ran_too_long = (end - float(group[0]["start"])) > max_duration
+            sentence_end = str(previous.get("text", "")).rstrip()[-1:] in ".?!"
+            if too_many_words or too_wide or long_pause or ran_too_long or sentence_end:
+                flush()
+
+        group.append({"text": text, "start": start, "end": end})
+
+    flush()
+    return cues
+
+
 def segments_to_cues(segments: list[dict], max_chars: int | None = None) -> list[dict]:
     """Normalize [{start,end,text}] into caption cues with wrapped text."""
     max_chars = max_chars or cfg.CAPTION_MAX_CHARS

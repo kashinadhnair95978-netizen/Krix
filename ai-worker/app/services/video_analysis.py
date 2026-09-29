@@ -23,7 +23,13 @@ def run_video_analysis(
     max_frames: int | None = None,
     start_offset: float | None = None,
 ) -> list[dict]:
-    """Sample frames and return timed visual observations for each one."""
+    """Sample frames and return timed visual observations for each one.
+
+    The vision model is loaded ONCE for the whole stage and unloaded once at the
+    end. There is deliberately no ``gc.collect()`` / ``empty_cache()`` between
+    frames: each one costs a full CUDA synchronize plus a cache clear, which on
+    a 12-frame job was pure overhead and made longer videos crawl.
+    """
     frames = sample_frames(
         video_path,
         work_dir,
@@ -43,22 +49,21 @@ def run_video_analysis(
     try:
         for timestamp, frame_path in frames:
             try:
-                image = Image.open(frame_path).convert("RGB")
+                with Image.open(frame_path) as handle:
+                    image = handle.convert("RGB")
                 event = vision.describe_frame(timestamp, image)
             except PipelineError as exc:
                 # One bad frame (e.g. model hiccup) shouldn't kill the job; skip it.
                 print(f"[warn] frame at {timestamp}s skipped: {exc.message}")
                 continue
             observations.append(event)
-            # Free the cache occasionally to keep peak VRAM low.
-            if len(frames) >= 4 and cfg.VISION_QUANTIZATION == "8bit":
-                from app.models.manager import free_gpu_cache
-
-                free_gpu_cache()
     finally:
         for _ts, frame_path in frames:
             if not cfg.KEEP_ARTIFACTS:
                 Path(frame_path).unlink(missing_ok=True)
+        # Release the vision model as soon as the stage is done so the next
+        # stage (Mistral) starts with the full 8 GB budget.
+        vision.unload()
 
     if not observations:
         raise PipelineError(

@@ -7,6 +7,7 @@ function isProtectedPath(pathname: string): boolean {
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/api/videos') ||
     pathname.startsWith('/api/upload') ||
+    pathname.startsWith('/api/ingest-url') ||
     pathname.startsWith('/api/repurpose') ||
     pathname.startsWith('/api/subscription') ||
     pathname.startsWith('/api/ai') ||
@@ -93,6 +94,7 @@ export const config = {
     '/dashboard/:path*',
     '/api/videos/:path*',
     '/api/upload/:path*',
+    '/api/ingest-url/:path*',
     '/api/repurpose/:path*',
     '/api/subscription/:path*',
     '/api/ai/:path*',

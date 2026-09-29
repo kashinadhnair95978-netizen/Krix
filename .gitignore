@@ -17,6 +17,17 @@ ai-worker/.venv
 ai-worker/.venv/*
 ai-worker/work
 ai-worker/work-*
+# Nested work dirs: AI_WORKER_WORK_DIR defaults to a relative "ai-worker/work",
+# so running uvicorn/pytest from inside ai-worker/ resolves it to
+# ai-worker/ai-worker/work. The patterns above are path-anchored and do not match it.
+ai-worker/**/work
+ai-worker/**/work-*
 ai-worker/**/__pycache__/
 *.py[cod]
 .pytest_cache/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+.playwright/

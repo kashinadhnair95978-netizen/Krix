@@ -174,7 +174,9 @@ def update_job(
 ) -> None:
     if not job_row_id:
         return
-    payload: dict = {"updated_at": "now()"}
+    # updated_at is maintained by a DB trigger (set_updated_at) — the worker only
+    # speaks PostgREST, so it must never send a timestamp literal.
+    payload: dict = {}
     if status:
         payload["status"] = status
     if stage:
@@ -183,6 +185,8 @@ def update_job(
         payload["error_code"] = error_code
     if error_message:
         payload["error_message"] = error_message
+    if not payload:
+        return
     try:
         client = get_client()
         client.table("video_analysis_jobs").update(payload).eq("id", job_row_id).execute()
@@ -204,7 +208,7 @@ def update_video(
     duration_seconds: float | None = None,
 ) -> None:
     client = get_client()
-    payload: dict = {"processing_stage": stage, "updated_at": "now()"}
+    payload: dict = {"processing_stage": stage}
     if transcript is not None:
         payload["transcript"] = transcript
     if transcript_segments is not None:
@@ -220,8 +224,16 @@ def update_video(
 
 
 def finalize_video(video_id: str, *, completed: bool, error_message: str | None = None) -> None:
-    now = "now()"
-    payload: dict = {"processing_ended_at": now, "updated_at": "now()"}
+    """Mark a video finished.
+
+    ``processing_ended_at`` is written as a real ISO-8601 UTC instant. The worker
+    cannot call ``now()`` over PostgREST — sending the string "now()" would be
+    stored (or rejected) as a bogus timestamp.
+    """
+    import datetime as _dt
+
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    payload: dict = {"processing_ended_at": now}
     if completed:
         payload["status"] = "completed"
         payload["processing_stage"] = "completed"
