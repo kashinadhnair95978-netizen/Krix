@@ -2,7 +2,9 @@
 
 > Turn one long video into a content campaign: 9:16 clips with burned-in captions, plus tweets, a blog draft, an email sequence, and LinkedIn posts — all derived from the actual audio and frames of the video.
 
-Krix is a Next.js web app plus a **self-hosted GPU video worker**. You upload a video (or paste a YouTube URL), the worker transcribes it, aligns every word to a timestamp, looks at sampled frames, scores candidate clips, renders the best ones to 9:16 MP4 with ASS captions, uploads them, and writes the repurposed text back to the database. The dashboard shows the results.
+**Krix is not production-ready.** The video pipeline below is real and tested. The repurposed **text** output is implemented but currently blocked on provider credit, and the marketing site advertises capabilities that do not exist yet. See [Verdict](#verdict) for the honest position and [`FRONTEND_FEATURE_AUDIT.md`](FRONTEND_FEATURE_AUDIT.md) for the full 177-feature breakdown.
+
+Krix is a Next.js web app plus a **self-hosted GPU video worker**. You upload a video (or paste a YouTube URL), the worker transcribes it, aligns every word to a timestamp, looks at sampled frames, scores candidate clips, renders the best ones to 9:16 MP4 with ASS captions, uploads them, and — when the LLM provider has credit — writes the repurposed text back to the database. The dashboard shows the clips.
 
 ---
 
@@ -37,39 +39,53 @@ Statuses are assigned from the code and from test runs recorded in this reposito
 | 🟢 **WORKING** | Implemented **and** verified end-to-end by a real test in this repo. |
 | 🟡 **PARTIAL** | Real implementation, but a required piece could not be executed here. |
 | 🟠 **SCAFFOLDED** | UI/route/schema exists; the real functionality is not implemented or is hardcoded data. |
-| 🔴 **BROKEN** | Exists and currently fails. |
+| 🔴 **BROKEN** | Exists and currently fails, **or** presents invented data as if it were real. |
 | ⚪ **PLANNED** | Not built. Roadmap context only. |
+| ⛔ **BLOCKED** | Code is correct, but an external dependency stops it from running. Not a code defect. |
+
+### Verdict
+
+> **Krix is NOT production-ready.** Overall **4 / 10**.
+>
+> Of 177 audited features, only **47 work** (27%). **75 of 177 — 42% — are mocked or missing**, concentrated in the marketing site, payments, and the developer platform. There is **no way to pay**, no real analytics, no projects, no calendar, no team, no API, and no MCP. One payment route lets a signed-in user grant themselves a paid plan without paying.
+>
+> The core upload-to-clip pipeline **is** real, tested, and would survive technical diligence (9 / 10). The problem is everything around it, and the gap between what the site advertises and what it does.
+>
+> Full detail: [`FRONTEND_FEATURE_AUDIT.md`](FRONTEND_FEATURE_AUDIT.md) · [`KRIX_FEATURE_IMPLEMENTATION_PLAN.md`](KRIX_FEATURE_IMPLEMENTATION_PLAN.md) · [`KRIX_PRODUCTION_READINESS_REPORT.md`](KRIX_PRODUCTION_READINESS_REPORT.md)
 
 ### Product areas
 
 | Area | Status | Evidence |
 | --- | --- | --- |
-| Marketing site (`/`, `/pricing`) | 🟢 | 16 components; `/`, `/pricing`, `/auth/login`, `/auth/signup` return 200 |
+| Marketing site (`/`, `/pricing`) | 🔴 | Pages return 200, but the surface is the least honest part of the product: it advertises ~30 capabilities, ~6 exist. 6 testimonials, 10 brand logos, 10 statistics and 5 platform performance tables are fabricated. Only 6 of 44 audited marketing items work (14%) |
+| Pricing page | 🔴 | Display only. All 4 tier CTAs go to `/auth/signup`; nothing is purchasable |
 | Email/password signup + login | 🟢 | Real Supabase Auth; Playwright `login smoke` passes |
-| Google OAuth | 🔴 | See [limitation 21](#21-google-oauth-callback-passes-the-wrong-value) |
-| Middleware route protection | 🟢 | 9 prefixes guarded in `src/middleware.ts:7` |
+| Google OAuth | 🔴 | See [limitation 4](#4-google-oauth-is-almost-certainly-broken) |
+| Middleware route protection | 🟡 | 9 prefixes guarded in `src/middleware.ts:7`, but the matcher omits `/api/analytics`, `/api/content` and `/api/payments`. Those three self-guard today, so nothing is exposed — it is a defence-in-depth gap, not a live hole |
 | Local video upload | 🟢 | 10.84 MB MP4 end-to-end in a real browser (TEST 1) |
 | YouTube URL ingestion | 🟡 | Route works; downloads blocked on this machine (limitation 2) |
 | Repeated-URL deduplication | 🟢 | 4 posts → 1 row, same `videoId`, 729–770 ms (TEST 4) |
 | Upload size limit | 🟢 | Live limit is 50 MiB, not 2 GB (limitation 1) |
 | Transcription (Qwen3-ASR) | 🟢 | Real audio → text + word timings |
 | Word alignment (ForcedAligner) | 🟢 | 4,704 aligned words on 60-minute audio |
-| Visual analysis (Qwen3-VL) | 🟢 | Real frames → structured observations |
+| Visual analysis (Qwen3-VL) | 🟡 | Real frames → structured observations, but only the **first ~120 s** of a long video is ever seen (limitation 7) |
 | Clip scoring (Mistral 7B) | 🟢 | 6 sub-scores + composite, validated |
 | Clip rendering (FFmpeg) | 🟢 | 2 × 1080×1920 MP4 produced from real video |
-| Captions (ASS, burned in) | 🟢 | Rendered into the video via the `subtitles` filter |
+| Captions (ASS, burned in) | 🟢 | Rendered into the video via the `subtitles` filter. The `.ass` itself is a temp artifact that is deleted, so caption text cannot be retrieved later (limitation 21) |
 | Dashboard library / video detail | 🟢 | Real Supabase data, live pipeline progress |
-| Auto content repurposing | 🟡 | Implemented; blocked by OpenRouter credit (limitation 3) |
-| Analytics | 🟡 | Video counts are real; platform/view numbers are hardcoded (limitation 12) |
+| Content edit / delete | 🔴 | `PUT` and `DELETE /api/content/[id]` return **HTTP 500** for every row — the ownership check throws before it completes (limitation 14) |
+| Auto content repurposing | ⛔ | Code is correct and reachable; blocked by OpenRouter credit, not by a defect (limitation 3) |
+| Analytics | 🔴 | 5 real counters buried under ~12 fabricated series, plus a "Viral score 8.4" tile. Errors render as invented data (limitation 12) |
 | Settings (profile, subscription, AI provider status) | 🟡 | Profile update and `GET /api/ai/config` are real; subscription cancellation hits the API but no plan can exist |
-| Payments (Stripe / Razorpay) | 🟠 | SDK wired, price IDs are `price_xxxxx` placeholders (limitation 8) |
-| Team | 🟠 | Three hardcoded members, no table, no API |
+| Payments (Stripe / Razorpay) | 🔴 | **CRITICAL:** a signed-in user can self-activate their own paid plan without paying. Price IDs are also `price_xxxxx` placeholders, so checkout cannot complete either (limitation 8, 25) |
+| API page (`/dashboard/api`) | 🔴 | **Fabricates an API key in the browser** (`'kx_live_' + 'x'.repeat(32)`) and documents six `/v1/*` endpoints that do not exist |
+| Team | 🟠 | Four hardcoded members, no table, no API, no seats |
 | Projects | 🟠 | Four hardcoded project names |
 | Calendar / scheduling | 🟠 | Static mock calendar, "Schedule a post" writes nothing |
-| API page (`/dashboard/api`) | 🟠 | Documents `/v1/*` endpoints that do not exist |
 | Inspiration | 🟠 | Static idea cards |
+| Legal pages (privacy, terms, security) | ⚪ | Not built. 17 footer links point at pages that do not exist (limitation 27) |
 | Social publishing | ⚪ | Not built. Marketing copy implies it. |
-| Smart Reframe / subject tracking | ⚪ | Not built. Rendering is a fixed center crop. |
+| Smart Reframe / subject tracking | ⚪ | Not built. Rendering is a fixed center crop. The signals a tracker needs are already computed and discarded. |
 | B-roll insertion | ⚪ | Not built |
 | AI editor | ⚪ | Not built |
 | Brand templates | ⚪ | Not built |
@@ -83,8 +99,9 @@ Statuses are assigned from the code and from test runs recorded in this reposito
 - It does **not** schedule anything. The calendar is a mockup.
 - It does **not** track real views, watch rate, or platform reach. Only your own video and post counts are real.
 - It does **not** reframe a subject. Clips are center-cropped to 9:16.
-- It does **not** charge anyone. Price IDs are placeholders.
+- It does **not** charge anyone. Price IDs are placeholders, **and** one route would let a user mark their own subscription paid without paying (limitation 25).
 - It does **not** accept 2 GB uploads. The storage bucket allows 50 MiB.
+- It does **not** let you edit or delete a repurposed content item. Both routes return 500.
 
 ---
 
@@ -500,15 +517,16 @@ Full DDL: `src/components/supabase/schema.sql`, `src/components/supabase/ai_pipe
 | `POST` | `/api/repurpose` | session **or** `x-service-key` | 🟡 writes 5 content types; `503 AI_PROVIDER_NOT_CONFIGURED` when the provider is unusable |
 | `POST` | `/api/content` | session | 🟡 generate + upsert repurposed content; implemented but **no client calls it** — the UI uses `/api/repurpose` instead |
 | `GET` | `/api/content/[id]` | session | 🟢 read one video's content |
-| `PUT` | `/api/content/[id]` | session | 🔴 returns `404` for every row — see limitation 14 |
-| `DELETE` | `/api/content/[id]` | session | 🔴 returns `404` for every row — see limitation 14 |
+| `PUT` | `/api/content/[id]` | session | 🔴 **returns `500` for every row** — the ownership check throws before it completes; see limitation 14 |
+| `DELETE` | `/api/content/[id]` | session | 🔴 **returns `500` for every row** — same cause; see limitation 14 |
 | `GET` | `/api/ai/config` | session | 🟢 provider, model, and whether the model was verified against the live catalog |
-| `GET` | `/api/analytics` | session | 🟡 real `totalVideos` / `completedVideos` / `processingVideos` / `postsThisWeek` / 14-day `posts` |
-| `POST` | `/api/auth/signup`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/upsert-profile` | public / session | 🟢 Supabase Auth wrappers |
-| `GET`/`POST`/`PUT` | `/api/subscription`, `/api/subscription/payment-method` | session | 🟠 reads and cancels subscription rows; no active plan can exist without real price IDs |
-| `POST` | `/api/payments/create`, `/api/payments/stripe`, `/api/payments/razorpay`, `/api/payments/verify` | session | 🟠 SDK calls with `price_xxxxx` / `plan_xxxxx` placeholders |
+| `GET` | `/api/analytics` | session | 🔴 5 real counters (`totalVideos` / `completedVideos` / `totalClips` / `totalContent` / 14-day `posts`); every series the page draws on top of them is hardcoded, and a failed fetch renders as invented data instead of an error (limitation 12) |
+| `POST` | `/api/auth/signup`, `/api/auth/login`, `/api/auth/logout`, `/api/auth/upsert-profile` | public / session | 🟢 Supabase Auth wrappers. **Unmetered** — no rate limit, so credential stuffing and mass signup are possible (limitation 26) |
+| `GET`/`POST`/`PUT` | `/api/subscription`, `/api/subscription/payment-method` | session | 🟠 reads and cancels subscription rows; no active plan can exist without real price IDs. Payment-method writes trust a client-supplied `pm_…`/`last4` (limitation 28) |
+| `POST` | `/api/payments/create`, `/api/payments/stripe`, `/api/payments/razorpay` | session | 🔴 `price_xxxxx` / `plan_xxxxx` placeholders, so both providers fail before any charge (limitation 8) |
+| `POST` | `/api/payments/verify` | session | 🔴 **CRITICAL — a signed-in user can self-activate their own paid plan without paying.** See limitation 25 |
 | `GET` | `/api/payments/provider` | public | 🟠 geo-routing; needs MaxMind credentials |
-| `POST` | `/api/payments/webhook` | signature | 🟠 Stripe `constructEvent` and Razorpay HMAC are implemented, but no real event has ever been delivered |
+| `POST` | `/api/payments/webhook` | signature | 🟡 Both providers **are** signature-verified (`stripe.webhooks.constructEvent`, and Razorpay HMAC-SHA256; each returns `400` on mismatch). But a body carrying **neither** signature header skips both blocks and still returns `{received: true}` → `200`. No real provider event has ever been delivered here |
 
 There is **no** `GET /api/content` and **no** `PATCH /api/content/[id]` — `/api/content` is POST-only, and `/api/content/[id]` exports GET, PUT, DELETE.
 
@@ -541,18 +559,37 @@ There is **no** `GET /api/content` and **no** `PATCH /api/content/[id]` — `/ap
 - Every API route re-checks the session; `getUserId()` reads only the server-side cookie.
 - YouTube URLs are validated and canonicalised before yt-dlp is invoked, and yt-dlp runs without a shell.
 - The worker sanitizes error messages and structured extras, redacting JWTs, key-shaped strings, bearer tokens, and `*_KEY`/`*_SECRET`/`*_TOKEN`/`*_PASSWORD` assignments.
-- Stripe webhook signature verification via `stripe.webhooks.constructEvent`; Razorpay via HMAC-SHA256 comparison.
+- Stripe webhook signature verification via `stripe.webhooks.constructEvent`; Razorpay via HMAC-SHA256 comparison. Both return `400` on mismatch.
 - Input validation on upload (MIME + extension + size), on repurpose (`videoId`, ownership), and on payments (plan key must exist in the plan map).
-- `.env*` is git-ignored except `.env.example`.
+- `.env*` is git-ignored except `.env.example`, including path-anchored `ai-worker/**/work-*` patterns.
+- Secret redaction in `ai-worker/app/errors.py:30-56` is shape-based, not name-based: it strips JWTs, provider key shapes (`sk`/`pk`/`rk`/`sb`/`sb_secret`/`hf`/`api`/`key`/`token`/`secret` + separator + 8+ chars), `Authorization` headers, and `key=value` pairs while keeping the surrounding diagnostic value. Covered by 21 error-mapping tests.
+- `getUserId()` reads **only** the server-side cookie session. It does not honour the service key and does not honour a client-supplied `x-user-id`, so a service-key request to a user-scoped route still gets a 401.
+- The repurpose callback sends only a `videoId`, so the worker cannot fabricate content.
+- Worker auth **fails closed** on an empty or literally `changeme` `AI_WORKER_API_KEY`.
+- `.env.example` is genuinely thorough — every provider and every limit is documented.
 
-**What is incomplete or unverified**
+### 🔴 Blocking security findings
+
+Ordered by risk. Findings 1–3 must be fixed before any public launch.
+
+1. **CRITICAL — a signed-in user can self-activate their own paid plan without paying.** `POST /api/payments/verify` checks the Razorpay HMAC **only** when `provider === 'razorpay'` (`verify/route.ts:17`). Any other value — `'stripe'`, or simply omitting the field — skips verification entirely and still runs `update({ status: 'active' })` (`:32-41`). The route *is* authenticated and *is* scoped with `.eq('user_id', userId)`, so it cannot grant a plan to **another** account — but no payment is required for your **own**. Secondary: the HMAC is computed over `${razorpayPaymentId}|${subscriptionId}`, which does not match Razorpay's documented `order_id`+`payment_id` scheme, so genuine payments likely fail to verify too; the comparison uses `!==`, not a constant-time compare. **Fix:** fulfil subscriptions only from a signature-verified provider webhook, and delete the client-callable verify route.
+2. **HIGH — payment methods are client-trusted.** A session alone authorises writing a `pm_…` string and a `last4` that the **client supplied** (`payments/payment-method/route.ts:16`). Derive `last4` and ownership from the provider instead.
+3. **HIGH — no rate limiting anywhere on auth.** Login and signup are unauthenticated and unmetered, so credential stuffing, mass account creation and free-tier quota farming are all possible. There is no CAPTCHA and no per-IP or per-email limit.
+4. **MEDIUM — `INTERNAL_SERVICE_KEY` has no placeholder guard on the Next.js side.** The worker rejects `changeme`, but `isValidServiceKey` (`auth-utils.ts:10-18`) only checks `if (!secret) return false`, and `middleware.ts:24-28` returns early on a match — **skipping every later middleware check**. Both compare with `===` rather than a constant-time compare. `.env.example` ships `INTERNAL_SERVICE_KEY=changeme`, so a deployment that copies it unchanged accepts a publicly known key on every protected path. **This is the asymmetry to be aware of:** the worker fails closed, the app does not.
+5. **MEDIUM — worker `/status` and `/jobs` are unauthenticated** and publish model IDs, quantization, pipeline config and ~25 `video_id`s. Safe only because the worker binds `127.0.0.1`. Do not expose it on a public interface.
+6. **MEDIUM — no legal pages, no cookie consent, no data export or deletion.** 17 footer links imply all of them exist.
+7. **MEDIUM — no rate limiting on any API route**, including the unauthenticated `/api/payments/create` and `/api/ingest-url`.
+8. **MEDIUM — no error tracking** on either process. A silent repurpose failure is indistinguishable from success.
+
+### What is incomplete or unverified
 
 - **Not production-grade security.** There is no CI, no dependency scanning, no rate limiting, no CAPTCHA, and no abuse protection on ingest or repurpose.
-- `x-user-id` in `lib/auth-utils.ts` is dead code and should be removed so nobody relies on it.
+- `x-user-id` in `lib/auth-utils.ts` is dead code and should be removed so nobody relies on it. `api-client.ts:32-36` still sends the header on every call, and the comment at `auth-utils.ts:51-54` describes a trust path that no longer exists — which invites a future implementer to "fix" it into a real bypass. It returns `null` today, so it is harmless, but delete both.
+- The `middleware.ts` matcher omits `/api/analytics`, `/api/content` and `/api/payments`. Those three re-check the session inside the route and correctly return `401`, so nothing is exposed today — it is a defence-in-depth gap, not a live hole.
 - `/api/ingest-url` shells out to yt-dlp with `INGEST_MAX_BYTES` and `INGEST_MAX_DURATION_SECONDS` as the only resource bound. A hostile URL can still make the server download up to 50 MiB and hold the request for 240 s. Single-flight locking limits concurrency to one per user, not globally.
 - `payments`, `usage_logs`, and `api_keys` are deny-all under RLS, so every read goes through the service-role key. Any bug in a route's `getUserId()` becomes a cross-tenant read.
 - No policy declares a `TO` role, so every policy applies to `PUBLIC`. Today the `auth.uid()` predicates make that harmless, but it is a fragile default.
-- Webhook handling is unverified against real provider traffic, and the handler treats an unrecognised or unsigned body as a success (`{received: true}`) rather than a rejection.
+- The webhook handler treats a body with **neither** signature header as success (`{received: true}`, `200`) rather than a rejection.
 - The E2E test password is committed as a default in three spec files. Acceptable only for the throwaway `krix.e2e@example.com` account.
 - `ai-worker/.env` and `.env.local` hold live keys on this machine. Both are git-ignored; keep it that way, and rotate if they ever land in history.
 
@@ -617,8 +654,8 @@ Every item below was confirmed in the code or in a test run.
 10. **The capabilities grid advertises unimplemented features:** "AI Producer", "ClipAnything", "AI B-Roll", "AI Reframe", "Editor", "Animated captions" (static ASS only), "Social scheduler", "Export to XML", "Thumbnail generator" (a plain extracted frame), "Brand template", "Team workspace", "API", "MCP", "Inspiration gallery".
 11. **`/dashboard/api` documents a fictional API** — `POST /v1/clips`, `POST /v1/clips/{id}/edit`, `POST /v1/clips/{id}/publish`, `GET /v1/usage` — and shows a sample `kx_live_…` key. None of it exists.
 12. **Analytics mixes real and fake numbers.** `totalVideos`, `completedVideos`, `processingVideos`, and `postsThisWeek` are real. "YouTube 48.2K", "TikTok 31.9K", "Instagram 18.4K", "X 12.1K", "Total views 112.6K", "Avg. watch rate 41%", the deltas, and the "top 10%" bar are hardcoded in `src/app/dashboard/analytics/page.tsx:17-20,61-64`. No platform data is ever fetched — Krix publishes nothing and has no platform integrations.
-13. **Team, Projects, Calendar, and Inspiration are static mockups.** Hardcoded members (`priya@krix.app`, `alex@krix.app`, `jamie@krix.app`), hardcoded project names, a hardcoded calendar whose "Schedule a post" writes nothing, and static idea cards. No tables, no API routes.
-14. **`PUT` and `DELETE /api/content/[id]` return 404 for every real row.** They embed `videos!inner(user_id)` and read it as an array — `(existing.videos as {user_id}[])[0].user_id`. `repurposed_content.video_id → videos.id` is many-to-one, so PostgREST returns a single **object**: `.length` is `undefined` (not `0`, so the guard does not trip) and `[0]` is `undefined`, so the comparison is `undefined !== userId` → `"Content not found"` → `404`. Editing and deleting a repurposed item therefore never works. `GET` is unaffected. **The fix is to select `videos!inner(user_id)` and read `existing.videos.user_id` as an object.**
+13. **Team, Projects, Calendar, and Inspiration are static mockups.** Four hardcoded members (`priya@krix.app`, `alex@krix.app`, `sam@krix.app`, `jamie@krix.app`), four hardcoded projects, a hardcoded calendar whose "Schedule a post" writes nothing, and static idea cards. No tables, no API routes, and a role `<select>` that changes nothing.
+14. **`PUT` and `DELETE /api/content/[id]` return HTTP 500 for every user and every row.** Both handlers select `'id, videos!inner(user_id)'` (`:66`, `:131`) and then read the embedded `videos` as an **array** (`:73-74`, `:138-139`). `repurposed_content.video_id → videos.id` is a **many-to-one** join, so PostgREST returns a single **object**, not a list. The guard then fails open in two steps: `(videos).length` is `undefined`, and `undefined === 0` is `false`, so the `length === 0` branch does not trip and evaluation continues; the very next expression, `(videos)[0].user_id`, dereferences `undefined` and throws `TypeError: Cannot read properties of undefined (reading 'user_id')`. The surrounding `catch` swallows it and returns `{ message: 'Server error' }` with **`status: 500`**. **The ownership check is not merely wrong — it never completes**, and it fails *open* rather than closed. Note it does not return 404: the code path that would produce 404 is never reached, because the property access throws first. `sanitizeFilename` is imported and never called, and a `regenerate` intent is accepted by no schema and silently ignored. `GET /api/content/[id]` is unaffected — it queries `videos` directly with `.eq('user_id', userId)` instead of embedding (`:22-27`). No UI is wired to PUT or DELETE, which is the only reason this has gone unnoticed. **Fix:** read the embed as an object — `(existing.videos as { user_id: string })?.user_id !== userId` — and add a route test. Roughly five lines plus one test; it is the highest bug-density item in the app.
 15. **`NOT_FOUND` maps to HTTP 403** in `errors.py`, and `FileNotFoundError` maps to `NOT_FOUND`, so a missing local file at a non-rendering stage returns 403. `/jobs/{id}` is the only true 404.
 16. **Stage vocabulary can drift.** `video_analysis_jobs.stage` has no CHECK constraint while `videos.processing_stage` does, and `clip_detection.py` raises with `stage="clips"` where `main.py` and `pipeline.py` use `"finding_clips"`.
 17. **Silent transcript truncation is possible.** `asr.py` only warns when alignment returns fewer than half the expected words; there is no hard check that generation stopped short of `max_new_tokens`.
@@ -629,6 +666,17 @@ Every item below was confirmed in the code or in a test run.
 22. The worker's `AI_WORKER_WORK_DIR` default is a **relative** `ai-worker/work`, so running uvicorn or pytest from inside `ai-worker/` creates a nested `ai-worker/ai-worker/work`. The scratch path is also relative, not derived from `__file__`.
 23. **No CI.** Nothing runs `tsc`, `lint`, `pytest`, or Playwright on push. There is no Dockerfile, no `vercel.json`, no GitHub Actions, and no migration tooling — schema changes are a manual copy-paste into the SQL Editor.
 24. `test-results/` and `playwright-report/` are now git-ignored, and so is the nested worker scratch dir, but the ~600 MB of media already sitting in `ai-worker/ai-worker/work/` should be deleted from disk.
+
+### Added by the 2026-09-30 frontend audit
+
+25. **CRITICAL — `/api/payments/verify` lets a signed-in user self-activate a paid plan without paying.** Signature verification is gated on `provider === 'razorpay'`; any other provider value, or omitting the field, skips it and still sets `status: 'active'`. Scope is limited to the caller's own account via `.eq('user_id', userId)`, so this is not a cross-account escalation — it is a free upgrade. See [Security](#-blocking-security-findings).
+26. **No rate limiting on authentication.** Signup and login are unauthenticated and unmetered — credential stuffing, mass account creation and quota farming are all unmitigated.
+27. **No legal pages and 17 dead footer links.** No privacy policy, terms, security page, cookie consent, data export, or account deletion. `Footer.tsx` links to all of them.
+28. **Payment-method writes are client-trusted.** A session alone authorises storing a client-supplied `pm_…` reference and `last4`; neither is derived from the provider.
+29. **Analytics cannot distinguish failure from data.** `hooks.ts:99-101` catches every error and returns the fallback, so a failed fetch renders the page's invented numbers as if the request succeeded. This is more dangerous than an obviously fake screen because it is indistinguishable from success.
+30. **Thumbnail uploads use the wrong MIME type.** `upload_clip` hardcodes `video/mp4`, so the JPEG thumbnail is stored as video.
+31. **The marketing surface is the least honest part of the product.** 6 named testimonials with roles and follower counts, 10 brand logos and "10,000+ creators" for a product with zero users, ~14 performance statistics, and complete performance tables for 5 platforms Krix has never posted to. Ten named capabilities — "AI Producer", "AI B-Roll", "AI Reframe", "AI Editor", "Animated captions", "Social scheduler", "XML export", "AI thumbnails", "Brand templates", "Team workspace" — have no code, no tables, and no routes. A public REST API and an MCP server are advertised without a "Soon" label in two of three places.
+32. **6 of the 8 dashboard routes are mock or blocked**, and the developer-platform page **fabricates an API key in the browser** (`api/page.tsx:43`: `'kx_live_' + 'x'.repeat(32)`), so a user who copies it pastes a literal run of 32 `x`s into their terminal. Shipping a fake key generator is worse than shipping nothing — it teaches users the API is real.
 
 ---
 
@@ -682,30 +730,36 @@ Generated and not in version control: `node_modules/`, `.next/`, `ai-worker/.ven
 
 ## 🗺️ Roadmap
 
-Derived from what the code and the reports actually identify. Nothing here is built.
+Derived from what the code and the reports actually identify. Nothing here is built. The full prioritised plan — 58 items across P0–P3 with effort estimates and acceptance gates — is in [`KRIX_FEATURE_IMPLEMENTATION_PLAN.md`](KRIX_FEATURE_IMPLEMENTATION_PLAN.md).
 
-### P0 — before any launch
+### P0 — before any launch (12 items, ~6–9 engineer-days)
 
-1. Fix the four confirmed defects: the Google OAuth callback (4), the `content/[id]` embed shape (14), the `NOT_FOUND` → 403 mapping (15), and the stage-vocabulary drift (16).
-2. Get content actually generated: fund or replace the LLM provider so `/api/repurpose` runs end-to-end (3), then verify the 5 content types against real transcripts (5).
-3. Replace every false marketing claim: pricing features (9), the capabilities grid (10), the fictional API page (11), and the hardcoded analytics numbers (12). Until this is done the site advertises products that do not exist.
-4. Add rate limiting and abuse protection to `/api/ingest-url`, `/api/repurpose`, and `/api/upload`.
-5. Add CI (`tsc`, `lint`, `pytest`) — today nothing runs on push.
-6. Make the schema reproducible: versioned migrations instead of a manual SQL-Editor paste.
-7. Remove the dead `x-user-id` branch from `lib/auth-utils.ts`.
-8. Confirm billing with real price IDs, or hide the pricing page until it works.
-9. Delete the ~600 MB of stray media in `ai-worker/ai-worker/work/` and make `AI_WORKER_WORK_DIR` absolute.
+1. **Delete the payment self-activation route** (25) and fulfil subscriptions only from a signature-verified provider webhook. This is the one finding that must not ship.
+2. Fix the four confirmed defects: the Google OAuth callback (4), the `content/[id]` embed shape → **500** (14), the `NOT_FOUND` → 403 mapping (15), and the stage-vocabulary drift (16).
+3. Reject `changeme` and empty values in `isValidServiceKey` exactly as the worker does, use `timingSafeEqual`, and fail startup if the value is still a placeholder.
+4. Stop trusting client-supplied payment-method data (28).
+5. Add per-IP and per-email rate limiting to auth, and per-user/per-IP limits on every API route (26, 7).
+6. Get content actually generated: fund or replace the LLM provider so `/api/repurpose` runs end-to-end (3), then verify the 5 content types against real transcripts (5).
+7. Replace every false marketing claim: pricing features (9), the capabilities grid (10, 31), the fictional API page and fabricated key (11, 32), and the hardcoded analytics numbers (12, 29). Until this is done the site advertises products that do not exist.
+8. Delete the hardcoded analytics series and add a real error state, so a failure can never render as invented data (29).
+9. Add CI (`tsc`, `lint`, `pytest`) — today nothing runs on push.
+10. Make the schema reproducible: versioned migrations instead of a manual SQL-Editor paste.
+11. Remove the dead `x-user-id` branch and its misleading comment from `lib/auth-utils.ts`.
+12. Publish `/privacy`, `/terms` and `/security`, and implement data export and deletion (27).
 
-### P1 — core product completion
+Also worth doing while in there: confirm billing with real price IDs or hide the pricing page until it works, and delete the ~600 MB of stray media in `ai-worker/ai-worker/work/` while making `AI_WORKER_WORK_DIR` absolute.
+
+### P1 — core product completion (20 items, ~8–12 engineer-days)
 
 1. Frame sampling across the whole video instead of the first 120 s.
 2. Add a real transcript-truncation guard and a head-preserving prompt budget.
-3. Replace center crop with subject tracking, so clips actually keep the speaker.
+3. Replace center crop with subject tracking, so clips actually keep the speaker. **The tracking signals are already computed in `models/vision.py` and thrown away — this is the best value in the whole plan.**
 4. Persist the caption file and add SRT/VTT sidecars plus caption style variants.
 5. Add a real clip-quality evaluation set so scoring changes are measurable.
 6. Raise the effective upload limit: set `file_size_limit` on the buckets, or add a chunked/resumable upload path so `UPLOAD_MAX_BYTES` means something.
 7. Make YouTube ingestion more reliable: better format fallbacks, cookies configured by default, clearer per-attempt diagnostics.
 8. Make analytics real or remove it — no hardcoded platform numbers.
+9. Make one checkout work end to end, and enforce plans on paid capabilities.
 
 ### P2 — growth
 
@@ -768,9 +822,12 @@ Future goals. **None of this has been started**, and no model in this repository
 
 | Document | What it is |
 | --- | --- |
-| [`INGESTION_RECOVERY_REPORT.md`](INGESTION_RECOVERY_REPORT.md) | Newest evidence (2026-09-30). Duplicate-ingestion PASS, auto-repurpose BLOCKED on provider credit, with real browser transcripts. |
+| [`FRONTEND_FEATURE_AUDIT.md`](FRONTEND_FEATURE_AUDIT.md) | **The 177-feature audit** behind the status table above: itemised per feature, with a mechanical final tally, a 20-item security findings list, and a verdict by surface. Newest (2026-09-30). |
+| [`KRIX_FEATURE_IMPLEMENTATION_PLAN.md`](KRIX_FEATURE_IMPLEMENTATION_PLAN.md) | **The plan to fix it.** 58 items across P0–P3 with dependencies, effort estimates, acceptance criteria and explicit anti-goals. P0+P1 is 14–21 engineer-days. |
+| [`KRIX_PRODUCTION_READINESS_REPORT.md`](KRIX_PRODUCTION_READINESS_REPORT.md) | **The launch decision.** Per-dimension scores, a 14-point launch gate, a risk register, and the NOT-production-ready verdict. |
+| [`INGESTION_RECOVERY_REPORT.md`](INGESTION_RECOVERY_REPORT.md) | Duplicate-ingestion PASS, auto-repurpose BLOCKED on provider credit, with real browser transcripts. |
 | [`CORE_PIPELINE_COMPLETION.md`](CORE_PIPELINE_COMPLETION.md) | The AI pipeline's verification record: 9/9 real pipeline tests, 188.97 s, 14 bugs found and fixed, 60-minute video results. |
-| [`AI_PIPELINE_STATUS.md`](AI_PIPELINE_STATUS.md) | Short per-component scorecard. Superseded in part by the two reports above. |
+| [`AI_PIPELINE_STATUS.md`](AI_PIPELINE_STATUS.md) | Short per-component scorecard. Superseded in part by the reports above. |
 | [`ai-worker/README.md`](ai-worker/README.md) | Worker setup, endpoint reference, and layout. |
 | [`AI_IMPLEMENTATION_PLAN.md`](AI_IMPLEMENTATION_PLAN.md) | The original audit and build plan. Historical. |
 | `DEVELOPMENT.md` | **Stale.** Still describes YouTube import as a no-op and transcription as OpenAI Whisper. Kept for history only — do not follow it. |
