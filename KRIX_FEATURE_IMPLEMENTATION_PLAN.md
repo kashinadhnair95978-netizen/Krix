@@ -46,13 +46,13 @@ Three secondary defects in the same file: the HMAC signs `${razorpayPaymentId}|$
 
 **Acceptance:** no route outside a provider webhook can write to `subscriptions`. Grep for `subscriptions` writes; the only permitted writers are the Stripe and Razorpay webhook handlers. Test: authenticate as a user, POST to this route with `provider: 'stripe'`, and confirm no subscription is activated.
 
-### P0-2 · Stop returning private keys to clients — 0.5 day
+### P0-2 · Verify no private key reaches a client response — 0.5 day
 
-**Why:** `/api/payments/create-order` prefers a **global** `STRIPE_SECRET_KEY` over a per-user secret, so account creation returns `secretKey` into the browser response. Separately, `POST /api/ai/config` writes a **global** AI key shared by every user.
+**Why:** originally logged as *private keys leave the server on account creation*. That claim is **not reproducible from the current source** and has been withdrawn: create-order does not exist (the route is /api/payments/create), no response field named secretKey appears anywhere in src/, grep -r secretKey src/ returns 0, /api/ai/config exports **only** GET (no POST), and there is no per-user secret concept - lib/stripe.ts:5 only reads process.env.STRIPE_SECRET_KEY with an sk_test_placeholder fallback. Kept as a regression gate because the underlying class of bug is worth locking down.
 
-**Action:** never return a private key in any response branch. Adopt platform-held keys (the simplest correct option) or per-user encrypted credentials.
+**Action:** no code change required today. Re-run the grep whenever billing code changes, and keep platform-held keys as the only key model - do not introduce per-user private credentials.
 
-**Acceptance:** grep the codebase for `secretKey` and `STRIPE_SECRET_KEY` in any response object. Zero client-facing returns.
+**Acceptance:** grep -r secretKey src/ returns 0 (**already true**), and no payment route returns a server-side secret. Add a route test that asserts the /api/payments/create response contains no key-shaped field.
 
 ### P0-3 · Fix `PUT`/`DELETE /api/content/[id]` — 0.2 day
 
@@ -193,7 +193,7 @@ The heuristic is the single most valuable item in this group. It is already writ
 
 | # | Item | Effort | Detail |
 |---|---|---|---|
-| P1-13 | **API rate limiting** | 0.5 d | None exists on any route, including unauthenticated `/api/ingest-url` and `/api/payments/create-order`. |
+| P1-13 | **API rate limiting** | 0.5 d | None exists on any route, including `/api/ingest-url` and `/api/payments/create` (both session-authenticated, but neither rate limited). |
 | P1-14 | **Delete the fake API-key generator** | 0.3 d | `api/page.tsx:43` fabricates `'kx_live_' + 'x'.repeat(32)` in the browser. A user will paste that into a terminal and it will mean nothing. Remove the button; label the surface Soon; then build for real in P2-7. |
 | P1-15 | **Error boundaries and error tracking** | 0.5 d | Sentry on Next.js and the worker. Only `console.log` exists today, and a silent repurpose failure is currently indistinguishable from success. |
 | P1-16 | **Component tests** | 2 d | Zero frontend tests, no jsdom, no RTL, no test ids. Add RTL coverage for the six pages that were mocks, plus the auth forms and the upload flow. |
@@ -350,7 +350,7 @@ A single, testable bar. Every line must pass.
 | # | Criterion | How it is verified |
 |---|---|---|
 | 1 | No route writes to `subscriptions` except a signature-verified webhook | Code review plus a test that posts a forged payload to every payment route |
-| 2 | No private key appears in any HTTP response | Grep for `secretKey` in response objects; test the signup response body |
+| 2 | No private key appears in any HTTP response | Already satisfied: `grep -r secretKey src/` returns 0. Re-verify after any billing change |
 | 3 | `PUT` and `DELETE /api/content/[id]` work for the owner and fail for everyone else | Two route tests |
 | 4 | Google sign-in completes | Manual test |
 | 5 | A test-mode payment produces a `subscriptions` row visible on `/dashboard/settings` | Manual end-to-end test |

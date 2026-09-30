@@ -74,17 +74,16 @@ A readiness report that lists only failures is not useful. Krix has real strengt
 
 | # | Severity | Finding |
 |---|---|---|
-| 1 | **CRITICAL** | **A signed-in user can self-activate their own paid subscription without paying.** `/api/payments/verify` verifies the Razorpay HMAC only when `provider === 'razorpay'`; any other or missing value skips verification and still writes `status: 'active'`. The route is authenticated and ownership-scoped, so it cannot affect another account â€” but no payment is required for one's own plan. The same file also signs a payload that does not match Razorpay's documented scheme, compares with `!==`, and prefers a global secret key. |
-| 2 | **HIGH** | **Private keys reach the browser.** `/api/payments/create-order` prefers a global `STRIPE_SECRET_KEY` over a per-user secret and returns `secretKey` in the response â€” so account creation exposes it. `POST /api/ai/config` similarly stores a global key shared by all users. |
-| 3 | **HIGH** | **Payment methods are client-trusted.** A valid session is the only check; the route then stores a `pm_` string and a `last4` the client supplied. |
-| 4 | **HIGH** | **No auth rate limiting.** Unmetered, unauthenticated login and signup permit credential stuffing, mass account creation, and quota farming. |
-| 5 | **HIGH** | **Google OAuth is broken** â€” a full `code=â€¦&state=â€¦` string is passed where a bare code is expected, plus a 200 ms session race. The only non-password signup path is unavailable. |
-| 6 | **MEDIUM** | **No CI, no pre-commit, no component tests, no billing tests, no security tests.** 222 tests exist and are never run automatically. |
-| 7 | **MEDIUM** | **Worker `/status` and `/jobs` are unauthenticated**, publishing model IDs, quantization, full pipeline config, and 25 `video_id`s. |
-| 8 | **MEDIUM** | **`INTERNAL_SERVICE_KEY` has no placeholder guard on the Next.js side, and `.env.example` ships it as `changeme`.** The worker fails closed on `changeme`; `isValidServiceKey` and `middleware.ts` do not — the latter returning early on a match and skipping every later check. Both use `===` rather than a constant-time compare. |
-| 9 | **MEDIUM** | **No legal pages, no cookie consent, no data export, no account deletion** â€” while 17 dead footer links imply all of them exist. |
-| 10 | **MEDIUM** | **No rate limiting on any route**, including the unauthenticated `/api/ingest-url` and `/api/payments/create-order`. |
-| 11 | **MEDIUM** | **No error tracking** on either tier. A failed LLM call leaves no row, no log, and no alert. |
+| 1 | **CRITICAL** | **A signed-in user can self-activate their own paid subscription without paying.** `/api/payments/verify` verifies the Razorpay HMAC only when `provider === 'razorpay'`; any other or missing value skips verification and still writes `status: 'active'`. The route is authenticated and ownership-scoped, so it cannot affect another account â€” but no payment is required for one's own plan. The same file also signs a payload that does not match Razorpay's documented scheme, compares with `!==`. |
+| 2 | **HIGH** | **Payment methods are client-trusted.** A valid session is the only check; the route then stores a `pm_` string and a `last4` the client supplied. |
+| 3 | **HIGH** | **No auth rate limiting.** Unmetered, unauthenticated login and signup permit credential stuffing, mass account creation, and quota farming. |
+| 4 | **HIGH** | **Google OAuth is broken** â€” a full `code=â€¦&state=â€¦` string is passed where a bare code is expected, plus a 200 ms session race. The only non-password signup path is unavailable. |
+| 5 | **MEDIUM** | **No CI, no pre-commit, no component tests, no billing tests, no security tests.** 222 tests exist and are never run automatically. |
+| 6 | **MEDIUM** | **Worker `/status` and `/jobs` are unauthenticated**, publishing model IDs, quantization, full pipeline config, and 25 `video_id`s. |
+| 7 | **MEDIUM** | **`INTERNAL_SERVICE_KEY` has no placeholder guard on the Next.js side, and `.env.example` ships it as `changeme`.** The worker fails closed on `changeme`; `isValidServiceKey` and `middleware.ts` do not — the latter returning early on a match and skipping every later check. Both use `===` rather than a constant-time compare. |
+| 8 | **MEDIUM** | **No legal pages, no cookie consent, no data export, no account deletion** â€” while 17 dead footer links imply all of them exist. |
+| 9 | **MEDIUM** | **No rate limiting on any route**, including `/api/ingest-url` and `/api/payments/create` (both session-authenticated, but neither rate limited). |
+| 10 | **MEDIUM** | **No error tracking** on either tier. A failed LLM call leaves no row, no log, and no alert. |
 | 12 | LOW | Silent failures render as data (`hooks.ts:99-101`); client-supplied `x-user-id` is still sent on every request; `api_keys` has RLS with zero policies and no FK; non-constant-time worker token compare; `"oom"` substring matching also matches "Zoom", "Broom", "Bloom"; interactive `<span>` elements are not keyboard-reachable; no FKs, CHECKs, or list indexes; secret redaction covers only two key names; storage cleanup is not surfaced on delete. |
 
 ### 4.2 Monetization â€” FAIL
@@ -157,7 +156,7 @@ A launch decision should be **denied** today. It should be **granted** when all 
 | # | Gate criterion | Verified by |
 |---|---|---|
 | 1 | No route outside a signature-verified provider webhook can write to `subscriptions` | Code review plus a test posting a forged payload to every payment route |
-| 2 | No private key appears in any HTTP response | Grep for `secretKey` in response objects; inspect the signup response body |
+| 2 | No private key appears in any HTTP response | Already satisfied: `secretKey` appears 0 times in `src/`; no payment route returns a private key. Re-verify after any billing change |
 | 3 | `PUT` and `DELETE /api/content/[id]` succeed for the owner and fail for everyone else, returning neither 500 | Two route tests |
 | 4 | Google sign-in completes | Manual test |
 | 5 | A test-mode payment produces a `subscriptions` row visible on `/dashboard/settings` | Manual end-to-end test |
