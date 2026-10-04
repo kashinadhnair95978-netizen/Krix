@@ -1,20 +1,32 @@
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { NextRequest } from 'next/server';
 import { supabaseServer } from './supabase';
+import { safeEqual } from './payment-security';
+import { isPlaceholderSecret } from './plans';
 
 /**
- * True when the request carries the correct internal service key.
- * Used for server-to-server calls (e.g. upload → process-video → repurpose)
- * that have no browser session.
+ * A service key is only accepted when the server is configured with a real one.
+ *
+ * `.env.example` ships `INTERNAL_SERVICE_KEY=changeme`, and the worker already
+ * fails closed on that value. The Next.js side used to accept it, which meant a
+ * deployment that copied the example file shipped a key an attacker already had.
+ * A placeholder configured on the server can therefore never authenticate a
+ * request, regardless of what the caller sends.
  */
+export function isServiceKeyConfigured(): boolean {
+  return !isPlaceholderSecret(process.env.INTERNAL_SERVICE_KEY);
+}
+
 export function isValidServiceKey(req: NextRequest | Request): boolean {
   const secret = process.env.INTERNAL_SERVICE_KEY;
-  if (!secret) return false;
+  if (isPlaceholderSecret(secret)) return false;
   const provided =
     req.headers.get('x-service-key') ||
     (req as NextRequest).headers?.get('x-service-key');
   if (!provided) return false;
-  return provided === secret;
+  // Constant time: a byte-at-a-time timing oracle on a shared secret is still a
+  // way to steal it.
+  return safeEqual(provided, secret as string);
 }
 
 export async function getUserId(req?: NextRequest): Promise<string | null> {

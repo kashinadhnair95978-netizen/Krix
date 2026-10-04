@@ -6,56 +6,49 @@ import { Button } from '@/components/ui/Button';
 interface StripeCheckoutProps {
   amount: number;
   plan: string;
-  onComplete?: (result: any) => void;
+  onComplete?: (result: { provider: string; status: string }) => void;
   onError?: (error: Error) => void;
 }
 
-export function StripeCheckout({
-  amount,
-  plan,
-  onComplete,
-  onError,
-}: StripeCheckoutProps) {
+/**
+ * Real Stripe checkout: the server creates a Stripe Checkout Session and this
+ * hands the browser to Stripe's hosted page. Nothing here decides that a payment
+ * happened — the subscription is activated by the Stripe webhook after Stripe
+ * confirms the charge.
+ */
+export function StripeCheckout({ amount, plan, onError }: StripeCheckoutProps) {
   const [loading, setLoading] = useState(false);
 
   const handleCheckout = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/payments/stripe', {
+      const res = await fetch('/api/payments/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify({ plan, provider: 'stripe' }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
+      if (res.status === 401) {
+        window.location.href = '/auth/login?redirectedFrom=/pricing';
+        return;
+      }
       if (!res.ok) {
-        throw new Error(data.message || 'Checkout failed');
+        throw new Error(data.message || 'Checkout could not be started.');
       }
-
-      if (data.clientSecret) {
-        // Production: render Stripe Elements with this client secret
-        // to complete 3DS/auth flows. For the hosted flow, redirect:
-        const publishable = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
-        if (publishable && confirmScriptLoaded()) {
-          // Compact hosted flow via a redirect URL is handled below
-          window.location.href = `/checkout/stripe?clientSecret=${data.clientSecret}`;
-          return;
-        }
+      if (!data.checkoutUrl) {
+        throw new Error('The payment provider did not return a checkout link.');
       }
-
-      onComplete?.({ provider: 'stripe', ...data });
-    } catch (err: any) {
-      onError?.(err instanceof Error ? err : new Error(err?.message || 'Checkout failed'));
-    } finally {
+      window.location.href = data.checkoutUrl;
+    } catch (err) {
       setLoading(false);
+      onError?.(err instanceof Error ? err : new Error('Checkout failed'));
     }
   };
 
-  const confirmScriptLoaded = () => typeof window !== 'undefined';
-
   return (
     <Button onClick={handleCheckout} loading={loading} className="w-full">
-      {loading ? 'Redirecting to Stripe...' : `Pay $${amount}/month`}
+      {loading ? 'Opening Stripe…' : `Pay $${amount}/month with Stripe`}
     </Button>
   );
 }

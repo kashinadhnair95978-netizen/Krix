@@ -6,7 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run typecheck && npm run lint && npm run test:worker && npm run test:e2e",
+    "test:worker": "cd ai-worker && .venv/Scripts/python -m pytest -q",
+    "test:e2e": "playwright test e2e/p0-security.spec.ts",
+    "test:e2e:all": "playwright test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

@@ -1,0 +1,112 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A new push supersedes an in-flight run rather than queueing behind it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static:
+    name: TypeScript and lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      # npx is used here rather than `npm run`, matching the documented command.
+      - run: npx tsc --noEmit
+      - run: npm run lint
+
+  worker:
+    name: AI worker tests (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      # ffmpeg must be built WITH libass: captions are burned in via the
+      # `ass` filter, and a build without it silently drops the caption step.
+      - name: Check ffmpeg has libass
+        run: ffmpeg -filters | grep -q subtitles && echo "libass present"
+
+      - name: Install python dependencies
+        working-directory: ai-worker
+        run: |
+          python -m venv .venv
+          ./.venv/bin/pip install --upgrade pip
+          ./.venv/bin/pip install -r requirements.txt
+
+      # The GPU integration tests self-skip without CUDA (see tests/conftest.py),
+      # so this is the full deterministic suite on CPU.
+      - name: Run pytest
+        working-directory: ai-worker
+        run: ./.venv/bin/python -m pytest -q
+
+  e2e:
+    name: Playwright API/security suite
+    runs-on: ubuntu-latest
+    # Every spec in e2e/ signs real users up against Supabase and therefore
+    # needs live project credentials. This job is skipped until those secrets
+    # are configured rather than reporting a red build that means "no
+    # credentials", not "broken code".
+    #
+    # To enable it, add these repository secrets:
+    #   NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    #   SUPABASE_SERVICE_ROLE_KEY, INTERNAL_SERVICE_KEY
+    if: ${{ vars.PLAYWRIGHT_HAS_SUPABASE == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+
+      - name: Write env
+        run: |
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}"
+            echo "SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+            echo "INTERNAL_SERVICE_KEY=${{ secrets.INTERNAL_SERVICE_KEY }}"
+            echo "NEXT_PUBLIC_APP_URL=http://localhost:3000"
+            echo "KRIX_APP_URL=http://localhost:3000"
+            echo "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_placeholder"
+            echo "STRIPE_SECRET_KEY=sk_test_placeholder"
+            echo "STRIPE_WEBHOOK_SECRET=whsec_placeholder"
+            echo "NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_test_placeholder"
+            echo "RAZORPAY_KEY_SECRET=placeholder"
+          } >> "$GITHUB_ENV"
+
+      - name: Start the app
+        run: |
+          npm run build
+          npm run start &
+          npx wait-on http://localhost:3000 --timeout 180000
+
+      - name: Playwright (p0 security)
+        run: npx playwright test e2e/p0-security.spec.ts --reporter=list
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: test-results/
+          retention-days: 7

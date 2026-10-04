@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseServer } from '@/lib/supabase';
 import { getUserId } from '@/lib/auth-utils';
-import { stripe } from '@/lib/stripe';
-import { razorpay } from '@/lib/razorpay';
+import { paymentError } from '@/lib/payment-security';
+import { getStripe } from '@/lib/stripe';
+import { getRazorpay } from '@/lib/razorpay';
+
+export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
   try {
@@ -61,9 +64,16 @@ export async function POST(req: NextRequest) {
     }
 
     if (subscription.payment_method === 'stripe') {
-      await stripe.subscriptions.cancel(subscription.recurring_id);
+      await getStripe().subscriptions.cancel(subscription.recurring_id);
     } else if (subscription.payment_method === 'razorpay') {
-      await razorpay.subscriptions.cancel(subscription.recurring_id);
+      await getRazorpay().subscriptions.cancel(subscription.recurring_id);
+    } else {
+      const err = paymentError(
+        409,
+        'PROVIDER_UNKNOWN',
+        'This subscription is not linked to a payment provider, so it cannot be cancelled automatically.'
+      );
+      return NextResponse.json(err.body, { status: err.status });
     }
 
     await supabase

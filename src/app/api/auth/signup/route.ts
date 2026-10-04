@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
 import { supabaseServer } from '@/lib/supabase';
+import { AUTH_LIMITS, clientIp, rateLimit } from '@/lib/rate-limit';
+
+export const runtime = 'nodejs';
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,6 +14,27 @@ export async function POST(req: NextRequest) {
         { message: 'Email, password, and name are required' },
         { status: 400 }
       );
+    }
+
+    // Metered before any credential is checked, so a wrong password costs the
+    // attacker the same as a right one.
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const limits = AUTH_LIMITS.signup;
+    for (const key of [`signup:ip:${clientIp(req)}`, `signup:email:${normalizedEmail}`]) {
+      const verdict = rateLimit(
+        key,
+        key.startsWith('signup:ip') ? limits.perIp : limits.perEmail,
+        limits.windowMs
+      );
+      if (!verdict.allowed) {
+        return NextResponse.json(
+          {
+            error: 'RATE_LIMITED',
+            message: 'Too many accounts were created from this device or email. Try again later.',
+          },
+          { status: 429, headers: { 'Retry-After': String(verdict.retryAfterSeconds) } }
+        );
+      }
     }
 
     const res = NextResponse.json({ message: 'Signup successful' });

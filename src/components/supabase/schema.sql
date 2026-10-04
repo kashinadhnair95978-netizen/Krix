@@ -182,6 +182,14 @@ CREATE INDEX IF NOT EXISTS idx_videos_user_id ON videos(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_repurposed_content_video_id ON repurposed_content(video_id);
 CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id);
+-- Billing lookups made by the provider webhooks and by /api/subscription.
+-- See supabase/migrations/202609300001_p0_billing_integrity.sql.
+CREATE INDEX IF NOT EXISTS idx_subscriptions_recurring_id
+  ON subscriptions(recurring_id) WHERE recurring_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_payments_external_payment_id
+  ON payments(external_payment_id) WHERE external_payment_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user_created
+  ON subscriptions(user_id, created_at DESC);
 
 -- ============================================
 -- Storage buckets

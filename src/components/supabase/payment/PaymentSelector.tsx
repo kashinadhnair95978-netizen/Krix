@@ -8,7 +8,7 @@ interface PaymentSelectorProps {
   plan: string;
   amountUsd: number;
   amountInr: number;
-  onComplete?: (result: any) => void;
+  onComplete?: (result: { provider: string; status: string }) => void;
 }
 
 export function PaymentSelector({
@@ -39,7 +39,7 @@ export function PaymentSelector({
     detect();
   }, [provider]);
 
-  const handleComplete = (result: any) => {
+  const handleComplete = (result: { provider: string; status: string }) => {
     onComplete?.(result);
   };
 

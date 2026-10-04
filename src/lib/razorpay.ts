@@ -1,28 +1,37 @@
 import Razorpay from 'razorpay';
+import { razorpayKeyId, razorpayKeySecret } from './plans';
 
-// Placeholder to keep the module importable before env vars are set.
-export const razorpay = new Razorpay({
-  key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || 'rzp_test_placeholder',
-  key_secret: process.env.RAZORPAY_KEY_SECRET || 'placeholder_secret',
-});
+export class RazorpayNotConfiguredError extends Error {
+  readonly code = 'PAYMENT_PROVIDER_NOT_CONFIGURED';
+  constructor(message: string) {
+    super(message);
+    this.name = 'RazorpayNotConfiguredError';
+  }
+}
 
-export const RAZORPAY_PLANS = {
-  basic: {
-    planId: 'plan_xxxxx', // Create in Razorpay Dashboard
-    amount: 1500 * 100, // ₹1500 in paise
-    interval: 12, // Monthly
-  },
-  pro: {
-    planId: 'plan_xxxxx',
-    amount: 2400 * 100,
-    interval: 12,
-  },
-  enterprise: {
-    planId: 'plan_xxxxx',
-    amount: 7000 * 100,
-    interval: 12,
-  },
-} as const;
+export function isRazorpayConfigured(): boolean {
+  return razorpayKeyId() !== null && razorpayKeySecret() !== null;
+}
+
+/**
+ * Fail-closed Razorpay client. Never falls back to a placeholder key: a
+ * placeholder that "works" would produce unverifiable signatures.
+ */
+let cached: Razorpay | null = null;
+
+export function getRazorpay(): Razorpay {
+  const keyId = razorpayKeyId();
+  const keySecret = razorpayKeySecret();
+  if (!keyId || !keySecret) {
+    throw new RazorpayNotConfiguredError(
+      'Razorpay credentials are not set (or are still placeholders). Checkout is unavailable until they are configured.'
+    );
+  }
+  if (!cached) {
+    cached = new Razorpay({ key_id: keyId, key_secret: keySecret });
+  }
+  return cached;
+}
 
 export interface RazorpayCustomerResult {
   id: string;
@@ -44,14 +53,28 @@ export interface RazorpaySubscriptionResult {
   created_at: number;
 }
 
+export interface RazorpayPaymentResult {
+  id: string;
+  entity: string;
+  amount: number;
+  currency: string;
+  status: string;
+  captured: boolean;
+  international: boolean;
+  method: string | null;
+  subscription_id: string | null;
+  invoice_id: string | null;
+  order_id: string | null;
+}
+
 export async function createRazorpayCustomer(
   email: string,
   name: string
 ): Promise<RazorpayCustomerResult> {
-  const customer = (await razorpay.customers.create({
+  const customer = (await getRazorpay().customers.create({
     email,
     name,
-  } as any)) as RazorpayCustomerResult;
+  } as never)) as RazorpayCustomerResult;
   return customer;
 }
 
@@ -59,10 +82,28 @@ export async function createRazorpaySubscription(
   planId: string,
   customerId: string
 ): Promise<RazorpaySubscriptionResult> {
-  const subscription = (await razorpay.subscriptions.create({
+  const subscription = (await getRazorpay().subscriptions.create({
     plan_id: planId,
     customer_id: customerId,
-    total_count: 0, // Infinite
-  } as any)) as RazorpaySubscriptionResult;
+    total_count: 0,
+  } as never)) as RazorpaySubscriptionResult;
+  return subscription;
+}
+
+/**
+ * Authoritative read of a payment from Razorpay. The client never gets to say
+ * whether a payment succeeded; this call does.
+ */
+export async function fetchRazorpayPayment(paymentId: string): Promise<RazorpayPaymentResult> {
+  const payment = (await getRazorpay().payments.fetch(paymentId)) as unknown as RazorpayPaymentResult;
+  return payment;
+}
+
+export async function fetchRazorpaySubscription(
+  subscriptionId: string
+): Promise<RazorpaySubscriptionResult> {
+  const subscription = (await getRazorpay().subscriptions.fetch(
+    subscriptionId
+  )) as unknown as RazorpaySubscriptionResult;
   return subscription;
 }

@@ -137,10 +137,19 @@ export const apiClient = {
     api.delete(`/api/content/${contentId}`),
 
   // Payments
-  createPayment: (plan: string, country: string) =>
-    api.post('/api/payments/create', { plan, country }),
-  verifyPayment: (paymentId: string, signature: string) =>
-    api.post('/api/payments/verify', { paymentId, signature }),
+  /**
+   * Creates a real checkout with the provider. Returns a checkout handle only —
+   * never a subscription state. Activation happens server-side from a verified
+   * provider event, so this response must never be read as "payment complete".
+   */
+  createPayment: (plan: string, provider?: 'stripe' | 'razorpay') =>
+    api.post('/api/payments/create', { plan, provider }),
+  confirmRazorpayPayment: (payload: {
+    subscriptionId: string;
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+  }) => api.post('/api/payments/razorpay/confirm', payload),
 
   // Subscription
   getSubscription: () => api.get('/api/subscription'),

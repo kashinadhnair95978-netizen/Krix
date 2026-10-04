@@ -1,45 +1,39 @@
 import Stripe from 'stripe';
+import { stripeSecretKey } from './plans';
 
-// Placeholder to keep the module importable before env vars are set.
-export const stripe = new Stripe(
-  process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder'
-);
+/**
+ * Stripe client holder.
+ *
+ * The SDK is constructed with a syntactically valid but useless key so the
+ * module stays importable during `next build` and in tests. Nothing may use
+ * this export: call `getStripe()`, which fails closed when the real key is
+ * missing or is still a `.env.example` placeholder.
+ */
+let cached: Stripe | null = null;
 
-export const STRIPE_PLANS = {
-  basic: {
-    priceId: 'price_xxxxx', // Create in Stripe Dashboard
-    amount: 1500, // $15
-    interval: 'month',
-  },
-  pro: {
-    priceId: 'price_xxxxx',
-    amount: 2400, // $24
-    interval: 'month',
-  },
-  enterprise: {
-    priceId: 'price_xxxxx',
-    amount: 7000, // $70
-    interval: 'month',
-  },
-} as const;
-
-export async function createStripeCustomer(email: string, userId: string) {
-  const customer = await stripe.customers.create({
-    email,
-    metadata: { userId },
-  });
-  return customer;
+export class StripeNotConfiguredError extends Error {
+  readonly code = 'PAYMENT_PROVIDER_NOT_CONFIGURED';
+  constructor(message: string) {
+    super(message);
+    this.name = 'StripeNotConfiguredError';
+  }
 }
 
-export async function createStripeSubscription(
-  customerId: string,
-  priceId: string
-) {
-  const subscription = await stripe.subscriptions.create({
-    customer: customerId,
-    items: [{ price: priceId }],
-    payment_behavior: 'default_incomplete',
-    expand: ['latest_invoice.payment_intent'],
-  });
-  return subscription;
+export function isStripeConfigured(): boolean {
+  return stripeSecretKey() !== null;
 }
+
+export function getStripe(): Stripe {
+  const key = stripeSecretKey();
+  if (!key) {
+    throw new StripeNotConfiguredError(
+      'STRIPE_SECRET_KEY is not set (or is still a placeholder). Checkout is unavailable until it is configured.'
+    );
+  }
+  if (!cached) {
+    cached = new Stripe(key);
+  }
+  return cached;
+}
+
+export { PLANS as STRIPE_PLANS } from './plans';

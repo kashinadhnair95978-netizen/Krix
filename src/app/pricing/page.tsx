@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { Navbar } from '@/components/landing/Navbar';
@@ -78,15 +78,91 @@ const plans = [
   },
 ];
 
+/**
+ * What the server says about the subscription, never what the browser claims.
+ * `active` is only ever set from a verified server response.
+ */
+type SubscriptionState = {
+  status: string;
+  plan?: string;
+  paymentMethod?: string;
+} | null;
+
+type CheckoutOutcome =
+  | { kind: 'active'; provider: string; plan: string | null }
+  | { kind: 'processing'; provider: string; detail: string }
+  | { kind: 'cancelled'; provider: string; detail: string };
+
 export default function PricingPage() {
   const [annual, setAnnual] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
-  const [paymentComplete, setPaymentComplete] = useState<any>(null);
+  const [outcome, setOutcome] = useState<CheckoutOutcome | null>(null);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleSelect = (planId: string) => setSelectedPlan(planId);
-  const handleComplete = (result: any) => {
-    setPaymentComplete(result);
+
+  const readSubscription = useCallback(async (): Promise<SubscriptionState> => {
+    const res = await fetch('/api/subscription', { credentials: 'include' });
+    if (!res.ok) return null;
+    return (await res.json()) as SubscriptionState;
+  }, []);
+
+  /**
+   * Poll the server for the subscription Stripe/Razorpay activated. Webhooks are
+   * asynchronous, so "still pending" is a real, honest answer — not a failure and
+   * not a fake success.
+   */
+  const pollForActivation = useCallback(
+    (provider: string, attemptsLeft = 10) => {
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+      const tick = async () => {
+        const subscription = await readSubscription().catch(() => null);
+        if (subscription?.status === 'active') {
+          setOutcome({ kind: 'active', provider, plan: subscription.plan ?? null });
+          return;
+        }
+        if (attemptsLeft <= 1) {
+          setOutcome({
+            kind: 'processing',
+            provider,
+            detail:
+              subscription?.status === 'pending'
+                ? 'Your payment was taken and the subscription is recorded. It becomes active as soon as the provider confirms it — this page will reflect it on your dashboard.'
+                : 'We have not received a confirmation for this payment yet. If you were charged, your plan will appear in the dashboard once the provider confirms it.',
+          });
+          return;
+        }
+        pollTimer.current = setTimeout(tick, 2000);
+      };
+      void tick();
+    },
+    [readSubscription]
+  );
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const checkout = params.get('checkout');
+    if (checkout === 'success') {
+      pollForActivation('stripe');
+    } else if (checkout === 'cancelled') {
+      setOutcome({
+        kind: 'cancelled',
+        provider: 'stripe',
+        detail: 'You left Stripe Checkout without paying. Nothing was charged.',
+      });
+    }
+    return () => {
+      if (pollTimer.current) clearTimeout(pollTimer.current);
+    };
+  }, [pollForActivation]);
+
+  const handleComplete = (result: { provider: string; status: string }) => {
     setSelectedPlan(null);
+    if (result.status === 'active') {
+      setOutcome({ kind: 'active', provider: result.provider, plan: null });
+    } else {
+      pollForActivation(result.provider);
+    }
   };
 
   const selected = plans.find((p) => p.id === selectedPlan);
@@ -241,6 +317,10 @@ export default function PricingPage() {
                 {' — '}${annual ? selected.annual : selected.monthly}/month
                 {annual ? ' (billed annually)' : ''}
               </p>
+              <p className="mt-2 text-xs text-neutral-500">
+                You will be asked to sign in first. Your plan is only upgraded after the payment
+                provider confirms the payment.
+              </p>
             </div>
             <PaymentSelector
               plan={selected.id}
@@ -252,29 +332,56 @@ export default function PricingPage() {
         )}
       </Modal>
 
-      {/* Success modal */}
+      {/* Checkout outcome — every branch is driven by a server response */}
       <Modal
-        open={paymentComplete !== null}
-        onClose={() => setPaymentComplete(null)}
-        title="Payment initiated"
+        open={outcome !== null}
+        onClose={() => setOutcome(null)}
+        title={
+          outcome?.kind === 'active'
+            ? 'Your plan is active'
+            : outcome?.kind === 'cancelled'
+              ? 'Checkout cancelled'
+              : 'Payment received'
+        }
       >
         <div className="space-y-4 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-black text-white">
-            <Check className="h-7 w-7" />
-          </div>
+          {outcome?.kind === 'active' && (
+            <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-black text-white">
+              <Check className="h-7 w-7" />
+            </div>
+          )}
           <p className="text-neutral-600">
-            Your payment was processed via{' '}
-            <span className="font-semibold capitalize text-black">
-              {paymentComplete?.provider}
-            </span>
-            . Check the dashboard for your upgraded plan.
+            {outcome?.kind === 'active' && (
+              <>
+                {outcome.plan ? (
+                  <>
+                    Your <span className="font-semibold capitalize text-black">{outcome.plan}</span> plan
+                    is active
+                  </>
+                ) : (
+                  'Your plan is active'
+                )}{' '}
+                via <span className="font-semibold capitalize text-black">{outcome.provider}</span>. It is
+                already active on your account.
+              </>
+            )}
+            {outcome?.kind === 'processing' && outcome.detail}
+            {outcome?.kind === 'cancelled' && outcome.detail}
           </p>
-          <Link
-            href="/dashboard"
-            className="mt-2 inline-flex w-full items-center justify-center rounded-full bg-black px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-neutral-800"
-          >
-            Go to Dashboard
-          </Link>
+          <div className="flex flex-col gap-2">
+            <Link
+              href="/dashboard/settings"
+              className="inline-flex w-full items-center justify-center rounded-full bg-black px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-neutral-800"
+            >
+              View my plan
+            </Link>
+            <Link
+              href="/dashboard"
+              className="inline-flex w-full items-center justify-center rounded-full border border-neutral-300 px-6 py-3 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-100"
+            >
+              Go to Dashboard
+            </Link>
+          </div>
         </div>
       </Modal>
 

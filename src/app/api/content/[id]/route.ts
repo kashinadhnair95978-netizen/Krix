@@ -6,6 +6,47 @@ interface RouteContext {
   params: { id: string };
 }
 
+type SupabaseLike = ReturnType<typeof supabaseServer>;
+
+/**
+ * Ownership check for a single repurposed content row.
+ *
+ * `videos!inner(user_id)` is a many-to-one embed, so PostgREST returns a single
+ * OBJECT — not an array. The previous code read `.length` and `[0]` on it:
+ * `.length` was `undefined`, the guard evaluated false, and
+ * `(videos)[0].user_id` threw a TypeError that the surrounding catch swallowed.
+ * Both endpoints therefore answered 500 for every request and the ownership
+ * check never actually ran.
+ *
+ * Returns false for a missing row, an unjoined row, and another user's row —
+ * the caller answers 404 in all three cases so ids cannot be probed.
+ */
+async function ownsContent(
+  supabase: SupabaseLike,
+  contentId: string,
+  userId: string
+): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('repurposed_content')
+    .select('id, videos!inner(user_id)')
+    .eq('id', contentId)
+    .maybeSingle();
+
+  // An empty result is "not mine", not a server error. A real transport or
+  // permission failure is logged and also treated as "not mine" so this check
+  // can never be the thing that turns into a 500.
+  if (error && (error as { code?: string }).code !== 'PGRST116') {
+    console.error('content ownership lookup failed:', error.message);
+    return false;
+  }
+  if (!data || typeof data !== 'object') return false;
+
+  const video = (data as { videos?: unknown }).videos;
+  if (!video || typeof video !== 'object' || Array.isArray(video)) return false;
+  const owner = (video as { user_id?: unknown }).user_id;
+  return typeof owner === 'string' && owner === userId;
+}
+
 // GET /api/content/[id]
 // `id` is treated as a video id: returns all repurposed content for a video.
 export async function GET(req: NextRequest, ctx: RouteContext) {
@@ -60,23 +101,8 @@ export async function PUT(req: NextRequest, ctx: RouteContext) {
     const body = await req.json();
     const supabase = supabaseServer();
 
-    // Verify the content belongs to a video owned by the user
-    const { data: existing } = await supabase
-      .from('repurposed_content')
-      .select('id, videos!inner(user_id)')
-      .eq('id', contentId)
-      .single();
-
-    if (
-      !existing ||
-      !existing.videos ||
-      (existing.videos as { user_id: string }[]).length === 0 ||
-      (existing.videos as { user_id: string }[])[0].user_id !== userId
-    ) {
-      return NextResponse.json(
-        { message: 'Content not found' },
-        { status: 404 }
-      );
+    if (!(await ownsContent(supabase, contentId, userId))) {
+      return NextResponse.json({ message: 'Content not found' }, { status: 404 });
     }
 
     const updates: Record<string, unknown> = {};
@@ -125,23 +151,8 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
     const contentId = ctx.params.id;
     const supabase = supabaseServer();
 
-    // Verify the content belongs to a video owned by the user
-    const { data: existing } = await supabase
-      .from('repurposed_content')
-      .select('id, videos!inner(user_id)')
-      .eq('id', contentId)
-      .single();
-
-    if (
-      !existing ||
-      !existing.videos ||
-      (existing.videos as { user_id: string }[]).length === 0 ||
-      (existing.videos as { user_id: string }[])[0].user_id !== userId
-    ) {
-      return NextResponse.json(
-        { message: 'Content not found' },
-        { status: 404 }
-      );
+    if (!(await ownsContent(supabase, contentId, userId))) {
+      return NextResponse.json({ message: 'Content not found' }, { status: 404 });
     }
 
     const { error } = await supabase

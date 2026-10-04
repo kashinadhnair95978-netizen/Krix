@@ -22,6 +22,7 @@ Browser traffic NEVER reaches this service directly.
 
 from __future__ import annotations
 
+import hmac
 import threading
 import traceback
 from typing import Annotated
@@ -69,7 +70,9 @@ def _check_auth(request: Request) -> None:
             message="AI_WORKER_API_KEY is not set on the worker",
         )
     auth = request.headers.get("authorization", "")
-    if auth != f"Bearer {cfg.AI_WORKER_API_KEY}":
+    # Constant-time compare: a byte-at-a-time timing oracle on the worker token
+    # would still be a way to steal it. Mirrors the Next.js side.
+    if not hmac.compare_digest(auth, f"Bearer {cfg.AI_WORKER_API_KEY}"):
         raise PipelineError(
             stage="auth", code="FORBIDDEN", message="Invalid or missing worker token"
         )

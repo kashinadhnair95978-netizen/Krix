@@ -1,8 +1,39 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { isPlaceholderSecret } from '@/lib/plans';
+
+/**
+ * Constant-time string comparison.
+ *
+ * Inlined rather than imported from `@/lib/payment-security` because middleware
+ * runs on the Edge runtime, where `node:crypto` is unavailable. The loop touches
+ * every character regardless of where the first difference is, so the response
+ * time does not leak the position of a correct prefix.
+ */
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+/**
+ * Payment paths that are intentionally reachable without a browser session.
+ *
+ *  - `/api/payments/webhook` is called by Stripe and Razorpay with no cookies;
+ *    it authenticates with a provider signature instead.
+ *  - `/api/payments/provider` only answers "which provider would this region
+ *    use" so the pricing page can render before sign-in.
+ *
+ * Everything else under `/api/payments` requires a session.
+ */
+const PUBLIC_PAYMENT_PATHS = ['/api/payments/webhook', '/api/payments/provider'];
 
 function isProtectedPath(pathname: string): boolean {
+  if (PUBLIC_PAYMENT_PATHS.includes(pathname)) return false;
   return (
     pathname.startsWith('/dashboard') ||
     pathname.startsWith('/api/videos') ||
@@ -12,18 +43,45 @@ function isProtectedPath(pathname: string): boolean {
     pathname.startsWith('/api/subscription') ||
     pathname.startsWith('/api/ai') ||
     pathname.startsWith('/api/pipeline') ||
-    pathname.startsWith('/api/clips')
+    pathname.startsWith('/api/clips') ||
+    // Defense in depth: these routes check the session themselves, but a route
+    // that forgot its own check must not be exposed because of that.
+    pathname.startsWith('/api/analytics') ||
+    pathname.startsWith('/api/content') ||
+    pathname.startsWith('/api/payments')
+  );
+}
+
+/**
+ * Fail closed before serving traffic: a production build that still carries the
+ * `.env.example` service key would let anyone who has read this repository
+ * impersonate internal service calls, so the process refuses to start.
+ *
+ * Skipped during `next build` (NEXT_PHASE === 'phase-production-build') so an
+ * image can still be built without production secrets present.
+ */
+function assertProductionServiceKey() {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (process.env.NEXT_PHASE === 'phase-production-build') return;
+  if (!isPlaceholderSecret(process.env.INTERNAL_SERVICE_KEY)) return;
+  throw new Error(
+    'Refusing to start: INTERNAL_SERVICE_KEY is missing or still a placeholder ' +
+      '("changeme"/"xxxxx"). Generate one with `openssl rand -hex 32` and set it ' +
+      'before running a production build.'
   );
 }
 
 export async function middleware(req: NextRequest) {
+  assertProductionServiceKey();
+
   const res = NextResponse.next();
 
   // Internal service-to-service calls (upload → process-video → repurpose)
-  // carry no browser session, only a shared secret.
+  // carry no browser session, only a shared secret. A placeholder configured on
+  // the server is never accepted, so a copied `.env.example` cannot authenticate.
   const serviceKey = process.env.INTERNAL_SERVICE_KEY;
   const providedKey = req.headers.get('x-service-key');
-  if (serviceKey && providedKey && providedKey === serviceKey) {
+  if (!isPlaceholderSecret(serviceKey) && providedKey && safeEqual(providedKey, serviceKey as string)) {
     return res;
   }
 
@@ -100,5 +158,8 @@ export const config = {
     '/api/ai/:path*',
     '/api/pipeline/:path*',
     '/api/clips/:path*',
+    '/api/analytics/:path*',
+    '/api/content/:path*',
+    '/api/payments/:path*',
   ],
 };
