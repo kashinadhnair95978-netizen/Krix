@@ -77,6 +77,14 @@ Statuses are assigned from the code and from test runs recorded in this reposito
 | Auto content repurposing | ⛔ | Code is correct and reachable; blocked by OpenRouter credit, not by a defect (limitation 3) |
 | Analytics | 🔴 | 5 real counters buried under ~12 fabricated series, plus a "Viral score 8.4" tile. Errors render as invented data (limitation 12) |
 | Settings (profile, subscription, AI provider status) | 🟡 | Profile update and `GET /api/ai/config` are real; subscription cancellation hits the API but no plan can exist |
+
+> **P0 remediation is in progress.** The audit rows above describe the state at
+> commit `5711f9d` and are kept as written. Several of them — Google OAuth,
+> pricing checkout, content edit/delete, middleware coverage, and the missing CI —
+> have since been fixed or hardened, and now carry a 20-test regression suite.
+> Current status, the evidence behind it, and the four remaining external
+> configuration steps are in
+> [`KRIX_P0_IMPLEMENTATION_REPORT.md`](KRIX_P0_IMPLEMENTATION_REPORT.md).
 | Payments (Stripe / Razorpay) | 🔴 | **CRITICAL:** a signed-in user can self-activate their own paid plan without paying. Price IDs are also `price_xxxxx` placeholders, so checkout cannot complete either (limitation 8, 25) |
 | API page (`/dashboard/api`) | 🔴 | **Fabricates an API key in the browser** (`'kx_live_' + 'x'.repeat(32)`) and documents six `/v1/*` endpoints that do not exist |
 | Team | 🟠 | Four hardcoded members, no table, no API, no seats |

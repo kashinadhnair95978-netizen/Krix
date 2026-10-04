@@ -27,8 +27,12 @@ const APP_URL = process.env.KRIX_APP_URL || 'http://localhost:3000';
 /** A syntactically valid but non-functional key must never authenticate. */
 const PLACEHOLDER_KEY = 'changeme';
 
-function uniqueEmail(prefix: string): string {
-  return `krix.p0.${prefix}.${Date.now()}.${Math.floor(Math.random() * 1e6)}@example.com`;
+/**
+ * Deterministic email per logical test user, so a re-run reuses the account
+ * instead of demanding another signup.
+ */
+function accountEmail(name: string): string {
+  return `krix.p0.${name}@example.com`;
 }
 
 const PASSWORD = 'Str0ng!Passw0rd!42';
@@ -36,11 +40,32 @@ const PASSWORD = 'Str0ng!Passw0rd!42';
 /**
  * Create a real user through the app's own signup route, so the test exercises
  * the same path a person does and leaves a real session-independent account.
+ *
+ * Two responses mean "this account already exists", not "the app is broken":
+ *   400 "already registered" — a previous suite run created it;
+ *   429 — the signup limiter (10 per IP per hour) refused, which is the P0 rate
+ *         limiting working as designed.
+ * In both cases the account is reusable, so sign it back in and carry on. This
+ * is what keeps the suite re-runnable against a long-lived dev server; CI starts
+ * a fresh server per run, so it always takes the signup path.
  */
 async function signup(request: APIRequestContext, email: string) {
   const res = await request.post(`${APP_URL}/api/auth/signup`, {
     data: { email, password: PASSWORD, name: 'P0 Tester' },
   });
+  if (res.status() === 200) return email;
+
+  if (res.status() === 400 || res.status() === 429) {
+    const login = await request.post(`${APP_URL}/api/auth/login`, {
+      data: { email, password: PASSWORD },
+    });
+    if (login.status() === 200) return email;
+    expect(
+      login.status(),
+      `signup answered ${res.status()} (${await res.text()}) and the fallback login failed: ${login.status()} ${await login.text()}`
+    ).toBe(200);
+  }
+
   expect(res.status(), `signup failed: ${res.status()} ${await res.text()}`).toBe(200);
   return email;
 }
@@ -86,7 +111,7 @@ test('P0-SEC-1: the client-callable payment verify route no longer exists', asyn
 });
 
 test('P0-SEC-2: a forged provider payload cannot activate a subscription', async ({ browser, request }) => {
-  const email = uniqueEmail('forge');
+  const email = accountEmail('forge');
   await signup(request, email);
   const ctx = await signIn(browser, email);
 
@@ -131,7 +156,7 @@ test('P0-SEC-3: checkout requires authentication', async ({ request }) => {
 });
 
 test('P0-SEC-4: checkout rejects an unknown plan and an invalid provider', async ({ browser, request }) => {
-  const email = uniqueEmail('validate');
+  const email = accountEmail('validate');
   await signup(request, email);
   const ctx = await signIn(browser, email);
 
@@ -149,7 +174,7 @@ test('P0-SEC-4: checkout rejects an unknown plan and an invalid provider', async
 });
 
 test('P0-SEC-5: an unconfigured provider fails closed with an actionable message and no secret', async ({ browser, request }) => {
-  const email = uniqueEmail('unconfigured');
+  const email = accountEmail('unconfigured');
   await signup(request, email);
   const ctx = await signIn(browser, email);
 
@@ -177,7 +202,7 @@ test('P0-SEC-5: an unconfigured provider fails closed with an actionable message
 });
 
 test('P0-SEC-6: no payment response ever contains a provider secret', async ({ browser, request }) => {
-  const email = uniqueEmail('nosecret');
+  const email = accountEmail('nosecret');
   await signup(request, email);
   const ctx = await signIn(browser, email);
 
@@ -214,8 +239,8 @@ test('P0-SEC-7: the webhook refuses an unsigned or badly signed request', async 
 });
 
 test('P0-SEC-8: a cross-user subscription id cannot be confirmed by another user', async ({ browser, request }) => {
-  const emailA = uniqueEmail('owner');
-  const emailB = uniqueEmail('attacker');
+  const emailA = accountEmail('owner');
+  const emailB = accountEmail('attacker');
   await signup(request, emailA);
   await signup(request, emailB);
   const ctxA = await signIn(browser, emailA);
@@ -252,7 +277,7 @@ test('P0-SEC-9: updating a payment method requires auth and refuses a foreign pm
   });
   expect(anon.status()).toBe(401);
 
-  const email = uniqueEmail('pm');
+  const email = accountEmail('pm');
   await signup(request, email);
   const ctx = await signIn(browser, email);
 
@@ -284,7 +309,7 @@ test('P0-CONTENT-1: PUT and DELETE on content answer 401 when unauthenticated', 
 });
 
 test('P0-CONTENT-2: PUT and DELETE answer 404 (not 500) for a missing row', async ({ browser, request }) => {
-  const email = uniqueEmail('missing');
+  const email = accountEmail('missing');
   await signup(request, email);
   const ctx = await signIn(browser, email);
 
@@ -303,7 +328,7 @@ test('P0-CONTENT-2: PUT and DELETE answer 404 (not 500) for a missing row', asyn
 });
 
 test('P0-CONTENT-3: a malformed id answers a client error, never a 500', async ({ browser, request }) => {
-  const email = uniqueEmail('malformed');
+  const email = accountEmail('malformed');
   await signup(request, email);
   const ctx = await signIn(browser, email);
 
@@ -358,7 +383,7 @@ test('P0-KEY-3: the service-key-protected routes require a session or a real key
 // ---------------------------------------------------------------------------
 
 test('P0-RATE-1: login is rate limited per email', async ({ request }) => {
-  const email = uniqueEmail('ratelimit');
+  const email = accountEmail('ratelimit');
   await signup(request, email);
 
   const statuses: number[] = [];
@@ -382,7 +407,7 @@ test('P0-RATE-1: login is rate limited per email', async ({ request }) => {
 });
 
 test('P0-RATE-2: signup is rate limited per email', async ({ request }) => {
-  const email = uniqueEmail('signupburst');
+  const email = accountEmail('signupburst');
   const statuses: number[] = [];
   for (let i = 0; i < 8; i++) {
     const res = await request.post(`${APP_URL}/api/auth/signup`, {
@@ -392,4 +417,85 @@ test('P0-RATE-2: signup is rate limited per email', async ({ request }) => {
   }
   expect(statuses.every((s) => [200, 400, 429].includes(s))).toBe(true);
   expect(statuses, 'signup was never rate limited').toContain(429);
+});
+
+// ---------------------------------------------------------------------------
+// 5. Google OAuth callback
+//
+// The successful round-trip cannot be exercised here: the Supabase project has
+// `external.google = false`, so there is no Google provider to complete a code
+// exchange against, and no Google client id/secret exists in any env file. What
+// CAN be proven without those credentials is the P0 fix itself: the callback
+// used to slice the whole query string and hand `code=...&state=...` to
+// exchangeCodeForSession, then navigate after a fixed 200 ms delay, so Google
+// sign-in always failed and sometimes produced a signed-out dashboard.
+//
+// These three tests pin the behaviour that bug used to get wrong: a callback
+// with no code, a callback with a code the server rejects, and the button that
+// starts the flow. Each must reach an honest terminal state — a reported
+// failure or a redirect — and none may leave a session or navigate into the app.
+// ---------------------------------------------------------------------------
+
+test('P0-OAUTH-1: a callback with no code reports the failure instead of hanging', async ({ page }) => {
+  const consoleErrors: string[] = [];
+  page.on('pageerror', (err) => consoleErrors.push(String(err)));
+
+  await page.goto('/auth/callback');
+  await expect(page.getByText('Sign-in failed')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/missing its authorization code/i)).toBeVisible();
+  await expect(page.getByRole('link', { name: /back to sign in/i })).toBeVisible();
+
+  // The old code left the user on an endless spinner; and it must not have
+  // navigated into the app.
+  expect(page.url()).toContain('/auth/callback');
+  expect(consoleErrors, 'the callback threw instead of handling the error').toEqual([]);
+});
+
+test('P0-OAUTH-2: a rejected code does not yield a session or a redirect to the app', async ({ page }) => {
+  await page.goto('/auth/callback?code=not-a-real-authorization-code&state=x');
+  await expect(page.getByText('Sign-in failed')).toBeVisible({ timeout: 60_000 });
+
+  // No session may have been established by a bogus code.
+  const url = page.url();
+  expect(url).toContain('/auth/callback');
+  expect(url).not.toContain('/dashboard');
+  const hasSessionToken = await page.evaluate(() =>
+    Boolean(localStorage.getItem('sb-local-auth-token') || sessionStorage.length > 0)
+  );
+  expect(hasSessionToken).toBe(false);
+});
+
+test('P0-OAUTH-3: the Google button either starts the flow or reports why it cannot', async ({ page }) => {
+  // Google OAuth is disabled on this Supabase project, so a completed round-trip
+  // is impossible here. What is testable, and what users actually feel, is that
+  // pressing "Continue with Google" resolves into one of two honest outcomes:
+  // the browser leaves for the provider, or an error is shown. An endless
+  // "Redirecting to Google…" spinner — the pre-P0 behaviour — is a failure.
+  await page.goto('/auth/login');
+
+  const googleButton = page.getByRole('button', { name: /continue with google/i });
+  await expect(googleButton).toBeVisible({ timeout: 30_000 });
+  await googleButton.click();
+
+  const outcome = await Promise.race([
+    page
+      .waitForURL((u) => !u.href.includes('/auth/login'), { timeout: 30_000 })
+      .then(() => 'redirected' as const),
+    page
+      .getByText(/failed|error|not enabled|not been enabled|unsupported/i)
+      .first()
+      .waitFor({ state: 'visible', timeout: 30_000 })
+      .then(() => 'reported' as const),
+  ]).catch(() => 'hung' as const);
+
+  // Which of the two paths was taken does not matter: Google being disabled is
+  // an environment fact, not a code defect. What must never happen is silence.
+  expect(outcome, 'the Google button spun forever with no error and no redirect').not.toBe(
+    'hung'
+  );
+
+  // If it did redirect, the destination must be the provider, never our own app.
+  if (outcome === 'redirected') {
+    expect(page.url()).toMatch(/accounts\.google\.com|supabase\.co\/auth/);
+  }
 });
